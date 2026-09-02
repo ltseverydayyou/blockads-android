@@ -2,16 +2,12 @@ module github.com/ltseverydayyou/blockads-windows-core
 
 go 1.23.5
 
-require (
-	github.com/lxn/walk v0.0.0-20210112085537-c389da54e794
-	github.com/nqmgaming/blockads-tunnel v0.0.0
-)
+require github.com/nqmgaming/blockads-tunnel v0.0.0
 
 require (
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/pprof v0.0.0-20210407192527-94a9f03dee38 // indirect
-	github.com/lxn/win v0.0.0-20210218163916-a377121e959e // indirect
 	github.com/miekg/dns v1.1.62 // indirect
 	github.com/onsi/ginkgo/v2 v2.9.5 // indirect
 	github.com/quic-go/quic-go v0.48.2 // indirect
@@ -30,7 +26,6 @@ require (
 	golang.org/x/tools/go/expect v0.1.1-deprecated // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb // indirect
-	gopkg.in/Knetic/govaluate.v3 v3.0.0 // indirect
 	gvisor.dev/gvisor v0.0.0-20250523182742-eede7a881b20 // indirect
 )
 

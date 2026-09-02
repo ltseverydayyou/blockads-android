@@ -18,8 +18,8 @@ func (m *Manager) Settings() Settings {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	s := m.settings
-	s.TrustedSSIDs = append([]string(nil), s.TrustedSSIDs...)
-	s.WireGuardProfiles = append([]WireGuardProfile(nil), s.WireGuardProfiles...)
+	s.TrustedSSIDs = append([]string{}, s.TrustedSSIDs...)
+	s.WireGuardProfiles = append([]WireGuardProfile{}, s.WireGuardProfiles...)
 	return s
 }
 
@@ -36,7 +36,7 @@ func (m *Manager) Status() Status {
 func (m *Manager) Filters() []FilterList {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return append([]FilterList(nil), m.filters...)
+	return append([]FilterList{}, m.filters...)
 }
 
 func (m *Manager) SetFilterEnabled(id string, enabled bool) error {
@@ -116,7 +116,7 @@ func (m *Manager) ActivateProfile(id string) error { return m.activateProfile(id
 func (m *Manager) Rules() []Rule {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return append([]Rule(nil), m.rules...)
+	return append([]Rule{}, m.rules...)
 }
 
 func (m *Manager) AddRule(text string) (Rule, error) {
@@ -183,7 +183,7 @@ func (m *Manager) SetRuleEnabled(id int64, enabled bool) error {
 func (m *Manager) Logs() []LogEntry {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return append([]LogEntry(nil), m.logs...)
+	return append([]LogEntry{}, m.logs...)
 }
 func (m *Manager) ClearLogs() error {
 	m.mu.Lock()

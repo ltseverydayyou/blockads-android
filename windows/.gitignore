@@ -1,0 +1,4 @@
+desktop/.gradle/
+desktop/build/
+desktop/src/main/resources/backend/BlockAdsCore.exe
+dist/*
