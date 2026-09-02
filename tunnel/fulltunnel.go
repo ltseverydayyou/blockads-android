@@ -4,7 +4,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"syscall"
 	"time"
 
 	"github.com/miekg/dns"
@@ -156,7 +155,7 @@ func (e *Engine) StartFull(fd int, protector SocketProtector) {
 
 	// Own the TUN fd (dup to avoid Android fdsan unique_fd crashes when the
 	// ParcelFileDescriptor on the Kotlin side is closed).
-	dupFd, err := syscall.Dup(fd)
+	dupFd, err := dupFD(fd)
 	if err != nil {
 		fail("StartFull: dup TUN fd %d failed: %v", fd, err)
 		return
@@ -322,7 +321,7 @@ func (w *udpDNSResponseWriter) Write(b []byte) (int, error) { return w.conn.Writ
 
 // Close is a no-op: the owning handleDNSOverUDP loop owns the conn and
 // closes it when the flow ends.
-func (w *udpDNSResponseWriter) Close() error   { return nil }
-func (w *udpDNSResponseWriter) TsigStatus() error { return nil }
+func (w *udpDNSResponseWriter) Close() error        { return nil }
+func (w *udpDNSResponseWriter) TsigStatus() error   { return nil }
 func (w *udpDNSResponseWriter) TsigTimersOnly(bool) {}
 func (w *udpDNSResponseWriter) Hijack()             {}

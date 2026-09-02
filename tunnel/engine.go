@@ -17,7 +17,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/miekg/dns"
@@ -92,9 +91,9 @@ type Engine struct {
 	appResolver     AppResolver
 	appUidResolver  AppUidResolver
 
-	adTries   []*MmapTrie
-	adTrieIDs []string
-	secTries  []*MmapTrie
+	adTries    []*MmapTrie
+	adTrieIDs  []string
+	secTries   []*MmapTrie
 	secTrieIDs []string
 
 	// Bloom filters for fast pre-filtering (skip trie if definitely clean)
@@ -160,8 +159,8 @@ type Engine struct {
 	fullTunnelDone chan struct{}
 
 	// Standalone Servers
-	standaloneUdp *dns.Server
-	standaloneTcp *dns.Server
+	standaloneUdp  *dns.Server
+	standaloneTcp  *dns.Server
 	standaloneUdp6 *dns.Server
 	standaloneTcp6 *dns.Server
 
@@ -180,9 +179,9 @@ type Stats struct {
 func NewEngine() *Engine {
 	router := NewRouter()
 	e := &Engine{
-		safeSearch:     NewSafeSearch(),
-		responseType:   ResponseCustomIP,
-		router:         router,
+		safeSearch:   NewSafeSearch(),
+		responseType: ResponseCustomIP,
+		router:       router,
 	}
 	e.interceptor = NewDnsInterceptor(e, router)
 	return e
@@ -246,7 +245,9 @@ func (e *Engine) SetTries(adTriePathsCsv, secTriePathsCsv, adBloomPathsCsv, secB
 	// Load ad tries
 	for _, path := range strings.Split(adTriePathsCsv, ",") {
 		path = strings.TrimSpace(path)
-		if path == "" { continue }
+		if path == "" {
+			continue
+		}
 		t, err := LoadMmapTrie(path)
 		if err != nil {
 			logf("Failed to load Ad Trie from %s: %v", path, err)
@@ -261,7 +262,9 @@ func (e *Engine) SetTries(adTriePathsCsv, secTriePathsCsv, adBloomPathsCsv, secB
 	// Load security tries
 	for _, path := range strings.Split(secTriePathsCsv, ",") {
 		path = strings.TrimSpace(path)
-		if path == "" { continue }
+		if path == "" {
+			continue
+		}
 		t, err := LoadMmapTrie(path)
 		if err != nil {
 			logf("Failed to load Security Trie from %s: %v", path, err)
@@ -276,7 +279,9 @@ func (e *Engine) SetTries(adTriePathsCsv, secTriePathsCsv, adBloomPathsCsv, secB
 	// Load ad bloom filter
 	for _, path := range strings.Split(adBloomPathsCsv, ",") {
 		path = strings.TrimSpace(path)
-		if path == "" { continue }
+		if path == "" {
+			continue
+		}
 		bf, err := LoadBloomFilter(path)
 		if err != nil {
 			logf("Failed to load Ad Bloom Filter from %s: %v", path, err)
@@ -289,7 +294,9 @@ func (e *Engine) SetTries(adTriePathsCsv, secTriePathsCsv, adBloomPathsCsv, secB
 	// Load security bloom filter
 	for _, path := range strings.Split(secBloomPathsCsv, ",") {
 		path = strings.TrimSpace(path)
-		if path == "" { continue }
+		if path == "" {
+			continue
+		}
 		bf, err := LoadBloomFilter(path)
 		if err != nil {
 			logf("Failed to load Security Bloom Filter from %s: %v", path, err)
@@ -416,8 +423,9 @@ func parseSplitZones(zones string) []string {
 // This function blocks until Stop() is called.
 //
 // Pipeline:
-//   TUN fd → DnsInterceptor → DNS (port 53) → adblock engine
-//                            → non-DNS       → Router → OutboundAdapter
+//
+//	TUN fd → DnsInterceptor → DNS (port 53) → adblock engine
+//	                         → non-DNS       → Router → OutboundAdapter
 func (e *Engine) Start(fd int, protector SocketProtector, wgConfigJSON string) {
 	e.mu.Lock()
 	if e.running {
@@ -441,7 +449,7 @@ func (e *Engine) Start(fd int, protector SocketProtector, wgConfigJSON string) {
 	e.mu.Unlock()
 
 	// Duplicate fd to take proper ownership and avoid Android fdsan unique_fd crashes
-	dupFd, err := syscall.Dup(fd)
+	dupFd, err := dupFD(fd)
 	if err != nil {
 		logf("Failed to dup TUN fd %d: %v", fd, err)
 		e.running = false
@@ -551,10 +559,10 @@ func (e *Engine) Stop() {
 		e.tunFile.Close()
 		e.tunFile = nil
 	}
-	
+
 	oldResolver := e.resolver
 	e.resolver = nil
-	
+
 	e.safeSearch.ClearCache()
 
 	for _, t := range e.adTries {
@@ -589,7 +597,7 @@ func (e *Engine) Stop() {
 
 	oldUdp := e.standaloneUdp
 	e.standaloneUdp = nil
-	
+
 	oldTcp := e.standaloneTcp
 	e.standaloneTcp = nil
 
@@ -789,26 +797,38 @@ func (e *Engine) serveDNS(w dns.ResponseWriter, r *dns.Msg, appOverride string) 
 	var matchedIDs []string
 
 	for i, secTrie := range secTries {
-		if secTrie == nil { continue }
+		if secTrie == nil {
+			continue
+		}
 		var secBloom *BloomFilter
-		if i < len(secBlooms) { secBloom = secBlooms[i] }
+		if i < len(secBlooms) {
+			secBloom = secBlooms[i]
+		}
 		if secBloom == nil || secBloom.MightContainDomainOrParent(domain) {
 			if secTrie.ContainsOrParent(domain) {
 				id := "security"
-				if i < len(e.secTrieIDs) { id = e.secTrieIDs[i] }
+				if i < len(e.secTrieIDs) {
+					id = e.secTrieIDs[i]
+				}
 				matchedIDs = append(matchedIDs, id)
 			}
 		}
 	}
 
 	for i, adTrie := range adTries {
-		if adTrie == nil { continue }
+		if adTrie == nil {
+			continue
+		}
 		var adBloom *BloomFilter
-		if i < len(adBlooms) { adBloom = adBlooms[i] }
+		if i < len(adBlooms) {
+			adBloom = adBlooms[i]
+		}
 		if adBloom == nil || adBloom.MightContainDomainOrParent(domain) {
 			if adTrie.ContainsOrParent(domain) {
 				id := "filter_list"
-				if i < len(e.adTrieIDs) { id = e.adTrieIDs[i] }
+				if i < len(e.adTrieIDs) {
+					id = e.adTrieIDs[i]
+				}
 				matchedIDs = append(matchedIDs, id)
 			}
 		}
@@ -1057,7 +1077,7 @@ func (e *Engine) StartStandalone(port int) error {
 
 	udpServer := &dns.Server{Addr: addr4, Net: "udp", Handler: dns.HandlerFunc(e.ServeDNS)}
 	tcpServer := &dns.Server{Addr: addr4, Net: "tcp", Handler: dns.HandlerFunc(e.ServeDNS)}
-	
+
 	udpServer6 := &dns.Server{Addr: addr6, Net: "udp6", Handler: dns.HandlerFunc(e.ServeDNS)}
 	tcpServer6 := &dns.Server{Addr: addr6, Net: "tcp6", Handler: dns.HandlerFunc(e.ServeDNS)}
 
@@ -1423,7 +1443,8 @@ func (e *Engine) SetCosmeticCSS(css string) {
 // ── AdBlockChecker implementation ────────────────────────────────────────────
 // IsDomainBlocked satisfies the AdBlockChecker interface used by the MITM
 // proxy.  It replicates the exact same blocking pipeline used for DNS queries:
-//   CustomRule(allow override) → SecurityTrie → AdTrie → Kotlin DomainChecker.
+//
+//	CustomRule(allow override) → SecurityTrie → AdTrie → Kotlin DomainChecker.
 func (e *Engine) IsDomainBlocked(host string) bool {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
@@ -1450,7 +1471,9 @@ func (e *Engine) IsDomainBlocked(host string) bool {
 	e.mu.Unlock()
 
 	for i, secTrie := range secTries {
-		if secTrie == nil { continue }
+		if secTrie == nil {
+			continue
+		}
 		var secBloom *BloomFilter
 		if i < len(secBlooms) {
 			secBloom = secBlooms[i]
@@ -1464,7 +1487,9 @@ func (e *Engine) IsDomainBlocked(host string) bool {
 
 	// ── Ad trie (Bloom pre-filter → Mmap Trie) ──
 	for i, adTrie := range adTries {
-		if adTrie == nil { continue }
+		if adTrie == nil {
+			continue
+		}
 		var adBloom *BloomFilter
 		if i < len(adBlooms) {
 			adBloom = adBlooms[i]
@@ -1607,7 +1632,9 @@ func (e *Engine) handleDNSQuery(queryInfo *DNSQueryInfo) {
 
 	// Security domains
 	for i, secTrie := range secTries {
-		if secTrie == nil { continue }
+		if secTrie == nil {
+			continue
+		}
 		var secBloom *BloomFilter
 		if i < len(secBlooms) {
 			secBloom = secBlooms[i]
@@ -1625,7 +1652,9 @@ func (e *Engine) handleDNSQuery(queryInfo *DNSQueryInfo) {
 
 	// Ad domains
 	for i, adTrie := range adTries {
-		if adTrie == nil { continue }
+		if adTrie == nil {
+			continue
+		}
 		var adBloom *BloomFilter
 		if i < len(adBlooms) {
 			adBloom = adBlooms[i]
