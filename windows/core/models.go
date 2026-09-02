@@ -1,4 +1,4 @@
-package main
+package blockadswin
 
 import "sync/atomic"
 
@@ -97,8 +97,8 @@ type Profile struct {
 	YouTubeRestrictedMode bool     `json:"youtubeRestrictedMode"`
 }
 type Stats struct {
-	TotalQueries   int64 `json:"totalQueries"`
-	BlockedQueries int64 `json:"blockedQueries"`
+	TotalQueries   int64 `json:"total"`
+	BlockedQueries int64 `json:"blocked"`
 }
 type Status struct {
 	Running       bool   `json:"running"`
