@@ -79,7 +79,7 @@ fun FirewallScreen(state: DesktopState, padding: PaddingValues) {
                         "Firewall",
                         "Control network access per application.",
                         state.settings.firewallEnabled,
-                    ) { enabled -> scope.launch { state.saveSettings(state.settings.copy(firewallEnabled = enabled)) } }
+                    ) { enabled -> scope.launch { state.updateSettings { current -> current.copy(firewallEnabled = enabled) } } }
                 }
             }
             item {

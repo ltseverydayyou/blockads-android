@@ -20,34 +20,74 @@ class BackendException(message: String) : RuntimeException(message)
 
 object BackendClient {
     private const val base = "http://127.0.0.1:8754"
+    private const val expectedCoreVersion = "0.2.2"
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()
     private var startedProcess: Process? = null
 
     suspend fun ensureRunning() = withContext(Dispatchers.IO) {
-        if (ping()) return@withContext
+        val current = statusSync()
+        if (current?.admin == true && current.version == expectedCoreVersion) return@withContext
+
+        if (current != null) {
+            if (!requestShutdown()) stopExistingCoreProcesses()
+            repeat(30) {
+                if (!ping()) return@repeat
+                delay(100)
+            }
+            if (ping()) stopExistingCoreProcesses()
+        }
+
         val runtimeDir = File(System.getenv("LOCALAPPDATA") ?: ".", "BlockAds/runtime").apply { mkdirs() }
         val exe = File(runtimeDir, "BlockAdsCore.exe")
         BackendClient::class.java.getResourceAsStream("/backend/BlockAdsCore.exe")?.use { input ->
             exe.outputStream().use { input.copyTo(it) }
         } ?: throw BackendException("Bundled BlockAdsCore.exe is missing")
+
         val log = File(runtimeDir, "core.log")
         startedProcess = ProcessBuilder(exe.absolutePath)
             .directory(runtimeDir)
             .redirectOutput(ProcessBuilder.Redirect.appendTo(log))
             .redirectError(ProcessBuilder.Redirect.appendTo(log))
             .start()
-        repeat(50) {
-            if (ping()) return@withContext
+
+        repeat(300) {
+            val ready = statusSync()
+            if (ready?.admin == true && ready.version == expectedCoreVersion) return@withContext
             delay(100)
         }
-        throw BackendException("BlockAds Windows core did not start. See ${log.absolutePath}")
+        throw BackendException("Administrator approval is required for BlockAds. See ${log.absolutePath}")
     }
+
+    private fun statusSync(): Status? = try {
+        val request = HttpRequest.newBuilder(URI("$base/status")).timeout(Duration.ofSeconds(1)).GET().build()
+        val response = http.send(request, HttpResponse.BodyHandlers.ofString())
+        if (response.statusCode() in 200..299) json.decodeFromString<Status>(response.body()) else null
+    } catch (_: Exception) { null }
 
     private fun ping(): Boolean = try {
         val request = HttpRequest.newBuilder(URI("$base/health")).timeout(Duration.ofSeconds(1)).GET().build()
         http.send(request, HttpResponse.BodyHandlers.discarding()).statusCode() == 200
     } catch (_: Exception) { false }
+
+    private fun requestShutdown(): Boolean = try {
+        val request = HttpRequest.newBuilder(URI("$base/shutdown"))
+            .timeout(Duration.ofSeconds(1))
+            .POST(HttpRequest.BodyPublishers.noBody())
+            .build()
+        http.send(request, HttpResponse.BodyHandlers.discarding()).statusCode() in 200..299
+    } catch (_: Exception) { false }
+
+    private fun stopExistingCoreProcesses() {
+        ProcessHandle.allProcesses().use { processes ->
+            processes.filter { process ->
+                process.info().command().orElse("").replace('/', '\\').endsWith("\\BlockAdsCore.exe", ignoreCase = true)
+            }.forEach { process ->
+                runCatching { process.destroy() }
+                if (process.isAlive) runCatching { process.destroyForcibly() }
+            }
+        }
+    }
 
     private suspend inline fun <reified T> get(path: String): T = request("GET", path, null)
     private suspend inline fun <reified T> delete(path: String): T = request("DELETE", path, null)

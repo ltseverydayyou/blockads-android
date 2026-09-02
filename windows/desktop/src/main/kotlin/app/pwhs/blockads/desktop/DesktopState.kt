@@ -1,8 +1,10 @@
-﻿package app.pwhs.blockads.desktop
+package app.pwhs.blockads.desktop
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class DesktopState {
     var status by mutableStateOf(Status())
@@ -14,6 +16,8 @@ class DesktopState {
     var loading by mutableStateOf(true)
     var busy by mutableStateOf(false)
     var message by mutableStateOf<String?>(null)
+
+    private val settingsMutex = Mutex()
 
     suspend fun initialize() {
         loading = true
@@ -86,9 +90,25 @@ class DesktopState {
 
     suspend fun clearLogs() = action { logs = BackendClient.clearLogs() }
 
-    suspend fun saveSettings(next: Settings) = action {
-        settings = BackendClient.saveSettings(next)
-        status = BackendClient.status()
+    suspend fun updateSettings(transform: (Settings) -> Settings) {
+        settingsMutex.withLock {
+            val previous = settings
+            val next = transform(previous)
+            if (next == previous) return
+
+            settings = next
+            busy = true
+            message = null
+            try {
+                settings = BackendClient.saveSettings(next)
+                status = BackendClient.status()
+            } catch (t: Throwable) {
+                settings = previous
+                message = t.message ?: t.toString()
+            } finally {
+                busy = false
+            }
+        }
     }
 
     private suspend fun action(block: suspend () -> Unit) {

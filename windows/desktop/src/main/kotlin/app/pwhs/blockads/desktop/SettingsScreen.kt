@@ -87,7 +87,7 @@ fun SettingsScreen(state: DesktopState, padding: PaddingValues, onOpenFilters: (
             SectionHeader("Protection", "Configure how BlockAds protects this PC.")
             SectionCard {
                 SettingsToggleItem(Icons.Default.Cached, "Auto reconnect", "Restart protection after network changes.", state.settings.autoReconnect) {
-                    scope.launch { state.saveSettings(state.settings.copy(autoReconnect = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(autoReconnect = it) } }
                 }
                 DividerInset()
                 SettingItem(Icons.Default.SettingsEthernet, "Routing mode", routingLabel(state.settings.routingMode)) {
@@ -95,37 +95,37 @@ fun SettingsScreen(state: DesktopState, padding: PaddingValues, onOpenFilters: (
                         "Routing mode",
                         state.settings.routingMode,
                         listOf(Choice("direct", "Direct / Local DNS"), Choice("wireguard", "WireGuard"), Choice("root", "Root Proxy")),
-                    ) { v -> state.saveSettings(state.settings.copy(routingMode = v)) }
+                    ) { v -> state.updateSettings { current -> current.copy(routingMode = v) } }
                 }
                 DividerInset()
                 SettingsToggleItem(Icons.Default.Speed, "Network switch delay", "Wait before restarting protection after a network change.", state.settings.networkSwitchDelayEnabled) {
-                    scope.launch { state.saveSettings(state.settings.copy(networkSwitchDelayEnabled = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(networkSwitchDelayEnabled = it) } }
                 }
                 DividerInset()
                 SettingsToggleItem(Icons.Default.Security, "SafeSearch", "Force supported search engines into SafeSearch.", state.settings.safeSearchEnabled) {
-                    scope.launch { state.saveSettings(state.settings.copy(safeSearchEnabled = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(safeSearchEnabled = it) } }
                 }
                 DividerInset()
                 SettingsToggleItem(Icons.Default.PlayCircle, "YouTube Restricted Mode", "Enforce YouTube Restricted Mode through DNS.", state.settings.youtubeRestrictedMode) {
-                    scope.launch { state.saveSettings(state.settings.copy(youtubeRestrictedMode = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(youtubeRestrictedMode = it) } }
                 }
                 DividerInset()
                 SettingItem(Icons.Default.Dns, "DNS provider", dnsProviderLabel(state.settings.dnsProviderId)) {
                     openChoice("DNS provider", state.settings.dnsProviderId, dnsProviders()) { id ->
                         val p = dnsProviderValues(id)
-                        state.saveSettings(state.settings.copy(dnsProviderId = id, upstreamDns = p.first, dohUrl = p.second))
+                        state.updateSettings { current -> current.copy(dnsProviderId = id, upstreamDns = p.first, dohUrl = p.second) }
                     }
                 }
                 DividerInset()
                 SettingItem(Icons.Default.NetworkCheck, "DNS protocol", state.settings.dnsProtocol) {
                     openChoice("DNS protocol", state.settings.dnsProtocol, listOf(Choice("PLAIN", "Plain DNS"), Choice("DOH", "DNS-over-HTTPS"), Choice("DOT", "DNS-over-TLS"), Choice("DOQ", "DNS-over-QUIC"))) { v ->
-                        state.saveSettings(state.settings.copy(dnsProtocol = v))
+                        state.updateSettings { current -> current.copy(dnsProtocol = v) }
                     }
                 }
                 DividerInset()
                 SettingItem(Icons.Default.Lock, "Blocked response", responseLabel(state.settings.dnsResponseType)) {
                     openChoice("Blocked response", state.settings.dnsResponseType, listOf(Choice("custom_ip", "0.0.0.0"), Choice("nxdomain", "NXDOMAIN"), Choice("refused", "REFUSED"))) { v ->
-                        state.saveSettings(state.settings.copy(dnsResponseType = v))
+                        state.updateSettings { current -> current.copy(dnsResponseType = v) }
                     }
                 }
             }
@@ -134,15 +134,15 @@ fun SettingsScreen(state: DesktopState, padding: PaddingValues, onOpenFilters: (
             SectionHeader("Interface", "Appearance and navigation.")
             SectionCard {
                 SettingItem(Icons.Default.ColorLens, "Theme", state.settings.themeMode.replaceFirstChar { it.uppercase() }) {
-                    openChoice("Theme", state.settings.themeMode, listOf(Choice("system", "System"), Choice("dark", "Dark"), Choice("light", "Light"))) { v -> state.saveSettings(state.settings.copy(themeMode = v)) }
+                    openChoice("Theme", state.settings.themeMode, listOf(Choice("system", "System"), Choice("dark", "Dark"), Choice("light", "Light"))) { v -> state.updateSettings { current -> current.copy(themeMode = v) } }
                 }
                 DividerInset()
                 SettingItem(Icons.Default.AutoAwesome, "Accent color", state.settings.accentColor.replaceFirstChar { it.uppercase() }) {
-                    openChoice("Accent color", state.settings.accentColor, listOf("green", "blue", "purple", "orange", "pink", "teal", "grey").map { Choice(it, it.replaceFirstChar(Char::uppercase)) }) { v -> state.saveSettings(state.settings.copy(accentColor = v)) }
+                    openChoice("Accent color", state.settings.accentColor, listOf("green", "blue", "purple", "orange", "pink", "teal", "grey").map { Choice(it, it.replaceFirstChar(Char::uppercase)) }) { v -> state.updateSettings { current -> current.copy(accentColor = v) } }
                 }
                 DividerInset()
                 SettingsToggleItem(Icons.Default.Language, "Navigation labels", "Show labels under the bottom navigation icons.", state.settings.showNavigationLabels) {
-                    scope.launch { state.saveSettings(state.settings.copy(showNavigationLabels = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(showNavigationLabels = it) } }
                 }
             }
 
@@ -150,19 +150,19 @@ fun SettingsScreen(state: DesktopState, padding: PaddingValues, onOpenFilters: (
             SectionHeader("Applications", "Windows equivalents of the Android app-management options.")
             SectionCard {
                 SettingsToggleItem(Icons.Default.Shield, "Firewall", "Enable per-application firewall policy.", state.settings.firewallEnabled) {
-                    scope.launch { state.saveSettings(state.settings.copy(firewallEnabled = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(firewallEnabled = it) } }
                 }
                 DividerInset()
                 SettingsToggleItem(Icons.Default.Wifi, "Pause on trusted Wi-Fi", "Pause protection on trusted wireless networks.", state.settings.pauseOnTrusted) {
-                    scope.launch { state.saveSettings(state.settings.copy(pauseOnTrusted = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(pauseOnTrusted = it) } }
                 }
                 DividerInset()
                 SettingsToggleItem(Icons.Default.Http, "HTTPS filtering", "Enable BlockAds HTTPS filtering when the Windows tunnel layer is available.", state.settings.httpsFilteringEnabled) {
-                    scope.launch { state.saveSettings(state.settings.copy(httpsFilteringEnabled = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(httpsFilteringEnabled = it) } }
                 }
                 DividerInset()
                 SettingsToggleItem(Icons.Default.Power, "Filter HTTP/3", "Filter QUIC/HTTP3 traffic when full-tunnel mode is active.", state.settings.filterHttp3) {
-                    scope.launch { state.saveSettings(state.settings.copy(filterHttp3 = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(filterHttp3 = it) } }
                 }
             }
 
@@ -172,15 +172,15 @@ fun SettingsScreen(state: DesktopState, padding: PaddingValues, onOpenFilters: (
                 SettingItem(Icons.Default.FilterList, "Filter setup", "${state.filters.count { it.enabled }} active lists") { onOpenFilters() }
                 DividerInset()
                 SettingsToggleItem(Icons.Default.Download, "Automatic updates", "Keep enabled filter lists up to date.", state.settings.autoUpdateEnabled) {
-                    scope.launch { state.saveSettings(state.settings.copy(autoUpdateEnabled = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(autoUpdateEnabled = it) } }
                 }
                 DividerInset()
                 SettingItem(Icons.Default.History, "Update frequency", state.settings.autoUpdateFrequency) {
-                    openChoice("Update frequency", state.settings.autoUpdateFrequency, listOf("6h", "12h", "24h", "48h", "manual").map { Choice(it, if (it == "manual") "Manual" else "Every $it") }) { v -> state.saveSettings(state.settings.copy(autoUpdateFrequency = v)) }
+                    openChoice("Update frequency", state.settings.autoUpdateFrequency, listOf("6h", "12h", "24h", "48h", "manual").map { Choice(it, if (it == "manual") "Manual" else "Every $it") }) { v -> state.updateSettings { current -> current.copy(autoUpdateFrequency = v) } }
                 }
                 DividerInset()
                 SettingsToggleItem(Icons.Default.Wifi, "Update on Wi-Fi only", "Avoid automatic filter downloads on metered/mobile connections.", state.settings.autoUpdateWifiOnly) {
-                    scope.launch { state.saveSettings(state.settings.copy(autoUpdateWifiOnly = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(autoUpdateWifiOnly = it) } }
                 }
             }
 
@@ -188,15 +188,15 @@ fun SettingsScreen(state: DesktopState, padding: PaddingValues, onOpenFilters: (
             SectionHeader("Logs & privacy")
             SectionCard {
                 SettingsToggleItem(Icons.Default.History, "Record DNS logs", "Store DNS query history locally on this PC.", state.settings.recordDnsLogs) {
-                    scope.launch { state.saveSettings(state.settings.copy(recordDnsLogs = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(recordDnsLogs = it) } }
                 }
                 DividerInset()
                 SettingsToggleItem(Icons.Default.Notifications, "Daily summary", "Daily protection summary notification.", state.settings.dailySummaryEnabled) {
-                    scope.launch { state.saveSettings(state.settings.copy(dailySummaryEnabled = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(dailySummaryEnabled = it) } }
                 }
                 DividerInset()
                 SettingsToggleItem(Icons.Default.Notifications, "Milestone notifications", "Notify when BlockAds reaches blocking milestones.", state.settings.milestoneNotificationsEnabled) {
-                    scope.launch { state.saveSettings(state.settings.copy(milestoneNotificationsEnabled = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(milestoneNotificationsEnabled = it) } }
                 }
             }
 
@@ -204,11 +204,11 @@ fun SettingsScreen(state: DesktopState, padding: PaddingValues, onOpenFilters: (
             SectionHeader("Windows")
             SectionCard {
                 SettingsToggleItem(Icons.Default.Power, "Start with Windows", "Launch BlockAds when you sign in.", state.settings.startWithWindows) {
-                    scope.launch { state.saveSettings(state.settings.copy(startWithWindows = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(startWithWindows = it) } }
                 }
                 DividerInset()
                 SettingsToggleItem(Icons.Default.Save, "Minimize to tray", "Keep BlockAds running when its window is closed/minimized.", state.settings.minimizeToTray) {
-                    scope.launch { state.saveSettings(state.settings.copy(minimizeToTray = it)) }
+                    scope.launch { state.updateSettings { current -> current.copy(minimizeToTray = it) } }
                 }
             }
 

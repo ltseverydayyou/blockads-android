@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -189,6 +190,13 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /data-dir", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]string{"path": s.m.DataDir()})
 	})
+	mux.HandleFunc("POST /shutdown", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]bool{"ok": true})
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			os.Exit(0)
+		}()
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.RemoteAddr, "127.0.0.1:") && !strings.HasPrefix(r.RemoteAddr, "[::1]:") {
 			http.Error(w, "loopback only", 403)
@@ -199,6 +207,9 @@ func (s *server) routes() http.Handler {
 }
 
 func main() {
+	if !ensureElevated() {
+		return
+	}
 	m, err := core.NewManager()
 	if err != nil {
 		log.Fatal(err)
