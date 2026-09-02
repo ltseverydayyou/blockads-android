@@ -6,16 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"runtime"
 	"strings"
+
+	"golang.org/x/sys/windows"
 )
 
 func currentSSID() string {
 	if runtime.GOOS != "windows" {
 		return ""
 	}
-	out, err := exec.Command("netsh", "wlan", "show", "interfaces").Output()
+	out, err := hiddenCommand("netsh", "wlan", "show", "interfaces").Output()
 	if err != nil {
 		return ""
 	}
@@ -31,9 +32,7 @@ func isAdmin() bool {
 	if runtime.GOOS != "windows" {
 		return false
 	}
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "$p=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent());if($p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){'true'}else{'false'}")
-	out, err := cmd.Output()
-	return err == nil && strings.Contains(strings.ToLower(string(out)), "true")
+	return windows.GetCurrentProcessToken().IsElevated()
 }
 
 func (m *Manager) takeOverDNS() error {
@@ -44,7 +43,7 @@ func (m *Manager) takeOverDNS() error {
 		return errors.New("administrator privileges are required to change Windows DNS")
 	}
 	capture := `$a=Get-NetAdapter|? Status -eq 'Up';$o=@();foreach($x in $a){$c=Get-CimInstance Win32_NetworkAdapterConfiguration|? InterfaceIndex -eq $x.InterfaceIndex|select -First 1;$v4=(Get-DnsClientServerAddress -InterfaceIndex $x.InterfaceIndex -AddressFamily IPv4).ServerAddresses;$v6=(Get-DnsClientServerAddress -InterfaceIndex $x.InterfaceIndex -AddressFamily IPv6).ServerAddresses;$o+=[pscustomobject]@{Index=$x.InterfaceIndex;Alias=$x.Name;DHCP=[bool]$c.DHCPEnabled;V4=@($v4);V6=@($v6)}};$o|ConvertTo-Json -Compress -Depth 5`
-	out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", capture).Output()
+	out, err := hiddenCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", capture).Output()
 	if err != nil {
 		return fmt.Errorf("capture DNS: %w", err)
 	}
@@ -52,7 +51,7 @@ func (m *Manager) takeOverDNS() error {
 		return err
 	}
 	setcmd := `Get-NetAdapter|? Status -eq 'Up'|%{Set-DnsClientServerAddress -InterfaceIndex $_.InterfaceIndex -ServerAddresses @('127.0.0.1','::1') -ErrorAction Stop};Clear-DnsClientCache`
-	b, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", setcmd).CombinedOutput()
+	b, err := hiddenCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", setcmd).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("set DNS: %v: %s", err, string(b))
 	}
@@ -93,11 +92,11 @@ func (m *Manager) restoreDNS() error {
 			}
 			cmd = fmt.Sprintf("Set-DnsClientServerAddress -InterfaceIndex %d -ServerAddresses @(%s) -ErrorAction Stop", x.Index, strings.Join(parts, ","))
 		}
-		if out, e := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", cmd).CombinedOutput(); e != nil {
+		if out, e := hiddenCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", cmd).CombinedOutput(); e != nil {
 			errs = append(errs, string(out))
 		}
 	}
-	_, _ = exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Clear-DnsClientCache").CombinedOutput()
+	_, _ = hiddenCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Clear-DnsClientCache").CombinedOutput()
 	if len(errs) > 0 {
 		return errors.New(strings.Join(errs, "; "))
 	}

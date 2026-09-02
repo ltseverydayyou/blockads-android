@@ -29,8 +29,13 @@ func (m *Manager) Status() Status {
 	paused := m.pausedTrusted
 	filterCount := len(m.filters)
 	ruleCount := len(m.rules)
+	checkSSID := m.settings.PauseOnTrusted
 	m.mu.RUnlock()
-	return Status{Running: running, PausedTrusted: paused, Stats: m.stats(), FilterCount: filterCount, RuleCount: ruleCount, CurrentSSID: currentSSID(), Admin: isAdmin(), Version: "windows-desktop-dev"}
+	ssid := ""
+	if checkSSID {
+		ssid = currentSSID()
+	}
+	return Status{Running: running, PausedTrusted: paused, Stats: m.stats(), FilterCount: filterCount, RuleCount: ruleCount, CurrentSSID: ssid, Admin: isAdmin(), Version: "windows-desktop-dev"}
 }
 
 func (m *Manager) Filters() []FilterList {
