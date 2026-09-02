@@ -156,7 +156,8 @@ type Engine struct {
 	// fullTunnelDone is created by StartFull and closed by Stop to unblock
 	// the full-network engine loop. Nil in the legacy DNS-only / WireGuard
 	// modes (StartFull is a separate, isolated data path — see fulltunnel.go).
-	fullTunnelDone chan struct{}
+	fullTunnelDone   chan struct{}
+	fullTunnelCloser interface{ Close() error }
 
 	// Standalone Servers
 	standaloneUdp  *dns.Server
@@ -553,10 +554,16 @@ func (e *Engine) Stop() {
 	// Unblock the full-network engine loop (StartFull), if running.
 	fullDone := e.fullTunnelDone
 	e.fullTunnelDone = nil
+	fullCloser := e.fullTunnelCloser
+	e.fullTunnelCloser = nil
 
-	// Close TUN, clear caches — all while locked
+	// Close TUN, clear caches — all while locked. Device-backed Windows TUNs
+	// do not expose an os.File, so close the generic full-tunnel device first.
+	if fullCloser != nil {
+		_ = fullCloser.Close()
+	}
 	if e.tunFile != nil {
-		e.tunFile.Close()
+		_ = e.tunFile.Close()
 		e.tunFile = nil
 	}
 

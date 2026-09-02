@@ -21,4 +21,4 @@ The build script:
 
 Outputs are written to `windows/dist/`.
 
-System-wide protection changes Windows DNS settings and therefore requires administrator privileges when protection is started.
+System-wide protection creates a Wintun `BlockAds` virtual adapter and routes IPv4 traffic through the repository's existing full-tunnel gVisor/filter engine. The backend binds its own upstream sockets to the physical interface to avoid VPN routing loops. Direct mode intentionally leaves IPv6 on the physical connection, matching the Android direct-mode behavior. Creating the adapter and routes requires administrator privileges.

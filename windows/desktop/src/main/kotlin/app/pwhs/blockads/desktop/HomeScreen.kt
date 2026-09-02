@@ -125,7 +125,7 @@ fun HomeScreen(
                     when (state.settings.routingMode) {
                         "wireguard" -> "WireGuard Mode"
                         "root" -> "Root Proxy Mode"
-                        else -> "Local DNS Mode"
+                        else -> "Wintun VPN Mode"
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,

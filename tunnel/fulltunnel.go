@@ -23,7 +23,7 @@ import (
 // return (dropping on overflow, which TCP retransmits recover) keeps the
 // dispatch path non-blocking so the stack never wedges on a slow TUN.
 type bufferedTun struct {
-	tun  *os.File
+	tun  io.ReadWriter
 	out  chan []byte
 	stop chan struct{}
 }
@@ -33,7 +33,7 @@ type bufferedTun struct {
 // blocking the gVisor dispatch goroutine.
 const tunWriteQueueDepth = 2048
 
-func newBufferedTun(tun *os.File) *bufferedTun {
+func newBufferedTun(tun io.ReadWriter) *bufferedTun {
 	b := &bufferedTun{tun: tun, out: make(chan []byte, tunWriteQueueDepth), stop: make(chan struct{})}
 	go b.drain()
 	return b

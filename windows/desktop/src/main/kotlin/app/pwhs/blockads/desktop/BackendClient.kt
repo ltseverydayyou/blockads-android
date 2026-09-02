@@ -20,7 +20,7 @@ class BackendException(message: String) : RuntimeException(message)
 
 object BackendClient {
     private const val base = "http://127.0.0.1:8754"
-    private const val expectedCoreVersion = "0.2.2"
+    private const val expectedCoreVersion = "1.0.0"
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()
     private var startedProcess: Process? = null
@@ -43,6 +43,10 @@ object BackendClient {
         BackendClient::class.java.getResourceAsStream("/backend/BlockAdsCore.exe")?.use { input ->
             exe.outputStream().use { input.copyTo(it) }
         } ?: throw BackendException("Bundled BlockAdsCore.exe is missing")
+        val wintun = File(runtimeDir, "wintun.dll")
+        BackendClient::class.java.getResourceAsStream("/backend/wintun.dll")?.use { input ->
+            wintun.outputStream().use { input.copyTo(it) }
+        } ?: throw BackendException("Bundled wintun.dll is missing")
 
         val log = File(runtimeDir, "core.log")
         startedProcess = ProcessBuilder(exe.absolutePath)

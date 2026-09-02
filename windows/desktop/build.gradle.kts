@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "app.pwhs.blockads"
-version = "0.2.2"
+version = "1.0.0"
 
 kotlin {
     jvmToolchain(21)
@@ -29,7 +29,7 @@ compose.desktop {
             modules("java.net.http")
             targetFormats(TargetFormat.Exe)
             packageName = "BlockAds"
-            packageVersion = "0.2.2"
+            packageVersion = "1.0.0"
             description = "BlockAds for Windows"
             vendor = "BlockAds"
             windows {

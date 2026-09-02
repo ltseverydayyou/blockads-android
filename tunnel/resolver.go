@@ -223,23 +223,12 @@ func (r *Resolver) queryPlain(rawQuery []byte, server string) ([]byte, error) {
 		server = server + ":53"
 	}
 
-	conn, err := net.DialTimeout("udp", server, connectTimeout)
+	dialer := &net.Dialer{Timeout: connectTimeout, Control: protectedControl(r.protectSocketFn)}
+	conn, err := dialer.Dial("udp", server)
 	if err != nil {
 		return nil, fmt.Errorf("plain dial: %w", err)
 	}
 	defer conn.Close()
-
-	// Protect the socket from VPN routing loop
-	if r.protectSocketFn != nil {
-		if udpConn, ok := conn.(*net.UDPConn); ok {
-			rawConn, err := udpConn.SyscallConn()
-			if err == nil {
-				rawConn.Control(func(fd uintptr) {
-					r.protectSocketFn(int(fd))
-				})
-			}
-		}
-	}
 
 	conn.SetDeadline(time.Now().Add(queryTimeoutPlain))
 
@@ -318,7 +307,7 @@ func (r *Resolver) queryDoT(rawQuery []byte, server string) ([]byte, error) {
 		port = p
 	}
 
-	dialer := &net.Dialer{Timeout: connectTimeout}
+	dialer := &net.Dialer{Timeout: connectTimeout, Control: protectedControl(r.protectSocketFn)}
 
 	// Resolve hostname first to protect the TCP socket
 	ips, err := net.LookupHost(host)
@@ -329,18 +318,6 @@ func (r *Resolver) queryDoT(rawQuery []byte, server string) ([]byte, error) {
 	conn, err := dialer.Dial("tcp", net.JoinHostPort(ips[0], port))
 	if err != nil {
 		return nil, fmt.Errorf("DoT dial: %w", err)
-	}
-
-	// Protect the socket
-	if r.protectSocketFn != nil {
-		if tcpConn, ok := conn.(*net.TCPConn); ok {
-			rawConn, err := tcpConn.SyscallConn()
-			if err == nil {
-				rawConn.Control(func(fd uintptr) {
-					r.protectSocketFn(int(fd))
-				})
-			}
-		}
 	}
 
 	tlsConn := tls.Client(conn, &tls.Config{
@@ -568,27 +545,6 @@ type protectedDialer struct {
 }
 
 func (d *protectedDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	dialer := &net.Dialer{Timeout: connectTimeout}
-	conn, err := dialer.DialContext(ctx, network, addr)
-	if err != nil {
-		return nil, err
-	}
-
-	// Protect the socket
-	if d.protectFn != nil {
-		var rawConn interface{ Control(func(fd uintptr)) error }
-		switch c := conn.(type) {
-		case *net.TCPConn:
-			rawConn, _ = c.SyscallConn()
-		case *net.UDPConn:
-			rawConn, _ = c.SyscallConn()
-		}
-		if rawConn != nil {
-			rawConn.Control(func(fd uintptr) {
-				d.protectFn(int(fd))
-			})
-		}
-	}
-
-	return conn, nil
+	dialer := &net.Dialer{Timeout: connectTimeout, Control: protectedControl(d.protectFn)}
+	return dialer.DialContext(ctx, network, addr)
 }

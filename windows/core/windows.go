@@ -42,7 +42,7 @@ func (m *Manager) takeOverDNS() error {
 	if !isAdmin() {
 		return errors.New("administrator privileges are required to change Windows DNS")
 	}
-	capture := `$a=Get-NetAdapter|? Status -eq 'Up';$o=@();foreach($x in $a){$c=Get-CimInstance Win32_NetworkAdapterConfiguration|? InterfaceIndex -eq $x.InterfaceIndex|select -First 1;$v4=(Get-DnsClientServerAddress -InterfaceIndex $x.InterfaceIndex -AddressFamily IPv4).ServerAddresses;$v6=(Get-DnsClientServerAddress -InterfaceIndex $x.InterfaceIndex -AddressFamily IPv6).ServerAddresses;$o+=[pscustomobject]@{Index=$x.InterfaceIndex;Alias=$x.Name;DHCP=[bool]$c.DHCPEnabled;V4=@($v4);V6=@($v6)}};$o|ConvertTo-Json -Compress -Depth 5`
+	capture := `$a=Get-NetAdapter|Where-Object{$_.Status -eq 'Up' -and $_.Name -ne 'BlockAds'};$o=@();foreach($x in $a){$c=Get-CimInstance Win32_NetworkAdapterConfiguration|? InterfaceIndex -eq $x.InterfaceIndex|select -First 1;$v4=(Get-DnsClientServerAddress -InterfaceIndex $x.InterfaceIndex -AddressFamily IPv4).ServerAddresses;$v6=(Get-DnsClientServerAddress -InterfaceIndex $x.InterfaceIndex -AddressFamily IPv6).ServerAddresses;$o+=[pscustomobject]@{Index=$x.InterfaceIndex;Alias=$x.Name;DHCP=[bool]$c.DHCPEnabled;V4=@($v4);V6=@($v6)}};$o|ConvertTo-Json -Compress -Depth 5`
 	out, err := hiddenCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", capture).Output()
 	if err != nil {
 		return fmt.Errorf("capture DNS: %w", err)
@@ -50,7 +50,7 @@ func (m *Manager) takeOverDNS() error {
 	if err = os.WriteFile(m.dnsBackupPath, out, 0600); err != nil {
 		return err
 	}
-	setcmd := `Get-NetAdapter|? Status -eq 'Up'|%{Set-DnsClientServerAddress -InterfaceIndex $_.InterfaceIndex -ServerAddresses @('127.0.0.1','::1') -ErrorAction Stop};Clear-DnsClientCache`
+	setcmd := `Get-NetAdapter|Where-Object{$_.Status -eq 'Up' -and $_.Name -ne 'BlockAds'}|ForEach-Object{Set-DnsClientServerAddress -InterfaceIndex $_.InterfaceIndex -ServerAddresses @('127.0.0.1') -ErrorAction Stop};Clear-DnsClientCache`
 	b, err := hiddenCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", setcmd).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("set DNS: %v: %s", err, string(b))

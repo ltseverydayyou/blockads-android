@@ -36,6 +36,7 @@ type Manager struct {
 	logCallback                                                                        *dnsLogCallback
 	ids                                                                                counters
 	autoUpdateStop                                                                     chan struct{}
+	systemTunnelCleanup                                                                func() error
 }
 
 func defaultSettings() Settings {
@@ -195,18 +196,34 @@ func (m *Manager) start(useSystemDNS bool) error {
 	if _, err := m.loadEnabledFilters(false); err != nil {
 		return err
 	}
-	m.mu.RLock()
-	port := m.settings.ListenPort
-	m.mu.RUnlock()
-	if err := e.StartStandalone(port); err != nil {
-		m.mu.Lock()
-		m.engine = nil
-		m.mu.Unlock()
-		return err
-	}
+	var cleanup func() error
 	if useSystemDNS {
-		if err := m.takeOverDNS(); err != nil {
+		// Undo a stale DNS-only takeover from older Windows builds before
+		// switching to the real Wintun full-network path.
+		_ = m.restoreDNS()
+		var err error
+		cleanup, err = startWindowsFullTunnel(e)
+		if err != nil {
 			e.Stop()
+			m.mu.Lock()
+			m.engine = nil
+			m.mu.Unlock()
+			return err
+		}
+		if err = m.takeOverDNS(); err != nil {
+			_ = m.restoreDNS()
+			e.Stop()
+			_ = cleanup()
+			m.mu.Lock()
+			m.engine = nil
+			m.mu.Unlock()
+			return err
+		}
+	} else {
+		m.mu.RLock()
+		port := m.settings.ListenPort
+		m.mu.RUnlock()
+		if err := e.StartStandalone(port); err != nil {
 			m.mu.Lock()
 			m.engine = nil
 			m.mu.Unlock()
@@ -214,6 +231,7 @@ func (m *Manager) start(useSystemDNS bool) error {
 		}
 	}
 	m.mu.Lock()
+	m.systemTunnelCleanup = cleanup
 	m.running = true
 	m.settings.ProtectionEnabled = true
 	m.pausedTrusted = false
@@ -225,16 +243,23 @@ func (m *Manager) start(useSystemDNS bool) error {
 func (m *Manager) stop(restore bool) error {
 	m.mu.Lock()
 	e := m.engine
+	cleanup := m.systemTunnelCleanup
+	m.systemTunnelCleanup = nil
 	m.engine = nil
 	m.running = false
 	m.settings.ProtectionEnabled = false
 	m.mu.Unlock()
-	if e != nil {
-		e.Stop()
-	}
 	var err error
 	if restore {
 		err = m.restoreDNS()
+	}
+	if e != nil {
+		e.Stop()
+	}
+	if cleanup != nil {
+		if cleanupErr := cleanup(); err == nil {
+			err = cleanupErr
+		}
 	}
 	_ = m.saveSettings()
 	return err
