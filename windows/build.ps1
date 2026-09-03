@@ -25,12 +25,12 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $installer = Get-ChildItem (Join-Path $desktop "build\compose\binaries\main\exe") -Filter "*.exe" | Select-Object -First 1
 if (-not $installer) { throw "Compose installer was not produced" }
-$setupOut = Join-Path $dist "BlockAds-Windows-Setup-v1.exe"
+$setupOut = Join-Path $dist "BlockAds-Windows-Setup-v1.1.exe"
 Copy-Item $installer.FullName $setupOut -Force
 
 $appDir = Join-Path $desktop "build\compose\binaries\main\app\BlockAds"
 if (-not (Test-Path $appDir)) { throw "Compose portable app image was not produced" }
-$portableOut = Join-Path $dist "BlockAds-Windows-Portable-v1.zip"
+$portableOut = Join-Path $dist "BlockAds-Windows-Portable-v1.1.zip"
 Compress-Archive -Path (Join-Path $appDir "*") -DestinationPath $portableOut -CompressionLevel Optimal -Force
 
 Write-Host "Built:"

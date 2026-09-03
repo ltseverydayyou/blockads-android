@@ -184,8 +184,9 @@ func extractDomain(rawQuery []byte) string {
 // queryPlainUnprotected sends a DNS query via plain UDP WITHOUT socket protection.
 // Used for split-DNS queries that must traverse the VPN/WireGuard tunnel.
 func (r *Resolver) queryPlainUnprotected(rawQuery []byte, server string) ([]byte, error) {
-	if !strings.Contains(server, ":") {
-		server = server + ":53"
+	server = dnsServerEndpoint(server, "53")
+	if server == "" {
+		return nil, fmt.Errorf("split-dns server not configured")
 	}
 
 	conn, err := net.DialTimeout("udp", server, connectTimeout)
@@ -252,9 +253,21 @@ func (r *Resolver) query(rawQuery []byte, protocol DNSProtocol, server, dohURL s
 }
 
 // queryPlain sends a DNS query via plain UDP.
+func dnsServerEndpoint(server, defaultPort string) string {
+	server = strings.TrimSpace(server)
+	if server == "" {
+		return ""
+	}
+	if _, _, err := net.SplitHostPort(server); err == nil {
+		return server
+	}
+	return net.JoinHostPort(strings.Trim(server, "[]"), defaultPort)
+}
+
 func (r *Resolver) queryPlain(rawQuery []byte, server string) ([]byte, error) {
-	if !strings.Contains(server, ":") {
-		server = server + ":53"
+	server = dnsServerEndpoint(server, "53")
+	if server == "" {
+		return nil, fmt.Errorf("plain DNS server not configured")
 	}
 
 	dialer := &net.Dialer{Timeout: connectTimeout, Control: protectedControl(r.protectSocketFn)}
@@ -601,4 +614,3 @@ func (d *protectedDialer) DialContext(ctx context.Context, network, addr string)
 	dialer := &net.Dialer{Timeout: connectTimeout, Control: protectedControl(d.protectFn), Resolver: d.resolver}
 	return dialer.DialContext(ctx, network, addr)
 }
-

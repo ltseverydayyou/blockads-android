@@ -43,8 +43,8 @@ func defaultSettings() Settings {
 	return Settings{
 		AutoReconnect: true, NetworkSwitchDelaySec: 30,
 		FilterURL:   "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
-		UpstreamDNS: "9.9.9.9", FallbackDNS: "94.140.14.14", DNSProtocol: "PLAIN",
-		DoHURL: "https://dns.quad9.net/dns-query", DNSProviderID: "quad9",
+		UpstreamDNS: "", FallbackDNS: "", DNSProtocol: "PLAIN",
+		DoHURL: "", DNSProviderID: "system",
 		ThemeMode: "system", AppLanguage: "system", AutoUpdateEnabled: true,
 		AutoUpdateFrequency: "24h", AutoUpdateWiFiOnly: true, AutoUpdateNotification: "silent",
 		DNSResponseType: "custom_ip", ProtectionLevel: "STANDARD", AccentColor: "green",
@@ -104,9 +104,20 @@ func newManager() (*Manager, error) {
 	m.checker = &ruleChecker{m: m}
 	m.logCallback = &dnsLogCallback{m: m}
 	m.loadJSON(m.settingsPath, &m.settings)
+	normalizedSystemDNS := false
+	if strings.EqualFold(m.settings.DNSProviderID, "system") {
+		normalizedSystemDNS = m.settings.UpstreamDNS != "" || m.settings.FallbackDNS != "" || !strings.EqualFold(m.settings.DNSProtocol, "PLAIN") || m.settings.DoHURL != ""
+		m.settings.UpstreamDNS = ""
+		m.settings.FallbackDNS = ""
+		m.settings.DNSProtocol = "PLAIN"
+		m.settings.DoHURL = ""
+	}
 	m.loadJSON(m.filtersPath, &m.filters)
 	m.loadJSON(m.rulesPath, &m.rules)
 	m.loadJSON(m.logsPath, &m.logs)
+	if normalizedSystemDNS {
+		_ = m.saveSettings()
+	}
 	for _, r := range m.rules {
 		if r.ID > m.ids.rule.Load() {
 			m.ids.rule.Store(r.ID)
@@ -180,19 +191,64 @@ func (m *Manager) saveLogs() error {
 	return writeJSON(m.logsPath, v)
 }
 
-func (m *Manager) configureEngine(e *tunnel.Engine) {
-	m.mu.RLock()
-	s := m.settings
-	m.mu.RUnlock()
+func effectiveDNSSettings(s Settings) (string, string, string, string, error) {
+	protocol := strings.ToUpper(strings.TrimSpace(s.DNSProtocol))
+	primary := strings.TrimSpace(s.UpstreamDNS)
+	fallback := strings.TrimSpace(s.FallbackDNS)
+	dohURL := strings.TrimSpace(s.DoHURL)
+
+	if strings.EqualFold(s.DNSProviderID, "system") {
+		servers, err := systemDNSServers()
+		if err != nil {
+			return "", "", "", "", err
+		}
+		primary = servers[0]
+		fallback = ""
+		if len(servers) > 1 {
+			fallback = servers[1]
+		}
+		protocol = "PLAIN"
+		dohURL = ""
+	}
+	if strings.EqualFold(s.DNSProviderID, "mullvad") {
+		protocol = "DOH"
+		fallback = ""
+		if dohURL == "" {
+			dohURL = "https://dns.mullvad.net/dns-query"
+		}
+	}
+
+	if primary == "" || primary == "0.0.0.0" || primary == "::" {
+		return "", "", "", "", fmt.Errorf("invalid upstream DNS %q", primary)
+	}
+	if fallback == "0.0.0.0" || fallback == "::" {
+		fallback = ""
+	}
+	return protocol, primary, fallback, dohURL, nil
+}
+
+func (m *Manager) configureEngineWithSettings(e *tunnel.Engine, s Settings) error {
+	protocol, primary, fallback, dohURL, err := effectiveDNSSettings(s)
+	if err != nil {
+		return err
+	}
 	e.SetDomainChecker(m.checker)
 	e.SetLogCallback(m.logCallback)
 	e.SetConnLogEnabled(s.RecordDNSLogs)
-	e.SetDNS(strings.ToUpper(s.DNSProtocol), s.UpstreamDNS, s.FallbackDNS, s.DoHURL)
+	e.SetDNS(protocol, primary, fallback, dohURL)
 	e.SetBlockResponseType(strings.ToUpper(s.DNSResponseType))
 	e.SetSafeSearch(s.SafeSearchEnabled)
 	e.SetYouTubeRestricted(s.YouTubeRestrictedMode)
 	e.SetSplitDNSZones(s.SplitDNSZones)
 	e.SetFilterHttp3(s.FilterHTTP3)
+	return nil
+}
+
+func (m *Manager) configureEngine(e *tunnel.Engine) error {
+	m.mu.RLock()
+	s := m.settings
+	m.mu.RUnlock()
+	return m.configureEngineWithSettings(e, s)
 }
 
 func (m *Manager) start(useSystemDNS bool) error {
@@ -204,7 +260,18 @@ func (m *Manager) start(useSystemDNS bool) error {
 	e := tunnel.NewEngine()
 	m.engine = e
 	m.mu.Unlock()
-	m.configureEngine(e)
+	if useSystemDNS {
+		// Recover any physical-adapter DNS settings left behind by legacy
+		// DNS-takeover builds before discovering the real system resolvers.
+		_ = m.restoreDNS()
+	}
+	if err := m.configureEngine(e); err != nil {
+		e.Stop()
+		m.mu.Lock()
+		m.engine = nil
+		m.mu.Unlock()
+		return err
+	}
 	if _, err := m.loadEnabledFilters(false); err != nil {
 		e.Stop()
 		m.mu.Lock()
@@ -214,9 +281,6 @@ func (m *Manager) start(useSystemDNS bool) error {
 	}
 	var cleanup func() error
 	if useSystemDNS {
-		// Undo a stale DNS-only takeover from older Windows builds before
-		// switching to the real Wintun full-network path.
-		_ = m.restoreDNS()
 		var err error
 		cleanup, err = startWindowsFullTunnel(e)
 		if err != nil {
@@ -279,15 +343,28 @@ func (m *Manager) applySettings(s Settings) error {
 	if s.ListenPort <= 0 {
 		s.ListenPort = 53
 	}
+	if strings.EqualFold(s.DNSProviderID, "system") {
+		s.UpstreamDNS = ""
+		s.FallbackDNS = ""
+		s.DoHURL = ""
+	}
+
+	m.mu.RLock()
+	e := m.engine
+	m.mu.RUnlock()
+	if e != nil {
+		if err := m.configureEngineWithSettings(e, s); err != nil {
+			return err
+		}
+	}
+
 	m.mu.Lock()
 	m.settings = s
-	e := m.engine
 	m.mu.Unlock()
 	if err := m.saveSettings(); err != nil {
 		return err
 	}
 	if e != nil {
-		m.configureEngine(e)
 		_, _ = m.loadEnabledFilters(false)
 	}
 	m.startAutoUpdater()
@@ -395,4 +472,3 @@ func (m *Manager) debugSummary() string {
 	defer m.mu.RUnlock()
 	return fmt.Sprintf("running=%v filters=%d rules=%d logs=%d", m.running, len(m.filters), len(m.rules), len(m.logs))
 }
-

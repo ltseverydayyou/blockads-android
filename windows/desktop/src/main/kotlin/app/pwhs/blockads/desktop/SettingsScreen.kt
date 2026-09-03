@@ -113,7 +113,19 @@ fun SettingsScreen(state: DesktopState, padding: PaddingValues, onOpenFilters: (
                 SettingItem(Icons.Default.Dns, "DNS provider", dnsProviderLabel(state.settings.dnsProviderId)) {
                     openChoice("DNS provider", state.settings.dnsProviderId, dnsProviders()) { id ->
                         val p = dnsProviderValues(id)
-                        state.updateSettings { current -> current.copy(dnsProviderId = id, upstreamDns = p.first, dohUrl = p.second) }
+                        state.updateSettings { current ->
+                            current.copy(
+                                dnsProviderId = id,
+                                upstreamDns = p.primary,
+                                fallbackDns = p.fallback,
+                                dohUrl = p.dohUrl,
+                                dnsProtocol = when (id) {
+                                    "system" -> "PLAIN"
+                                    "mullvad" -> "DOH"
+                                    else -> current.dnsProtocol
+                                },
+                            )
+                        }
                     }
                 }
                 DividerInset()
@@ -260,14 +272,16 @@ private fun dnsProviders() = listOf(
     Choice("system", "System Default"), Choice("adguard", "AdGuard DNS"), Choice("cloudflare", "Cloudflare DNS"), Choice("cloudflare_family", "Cloudflare Family"),
     Choice("google", "Google DNS"), Choice("mullvad", "Mullvad DNS"), Choice("opendns", "OpenDNS"), Choice("opendns_family", "OpenDNS Family Shield"), Choice("quad9", "Quad9"),
 )
-private fun dnsProviderValues(id: String): Pair<String, String> = when (id) {
-    "adguard" -> "94.140.14.14" to "https://dns.adguard-dns.com/dns-query"
-    "cloudflare" -> "1.1.1.1" to "https://cloudflare-dns.com/dns-query"
-    "cloudflare_family" -> "1.1.1.3" to "https://family.cloudflare-dns.com/dns-query"
-    "google" -> "8.8.8.8" to "https://dns.google/dns-query"
-    "mullvad" -> "194.242.2.2" to "https://dns.mullvad.net/dns-query"
-    "opendns" -> "208.67.222.222" to ""
-    "opendns_family" -> "208.67.222.123" to ""
-    "quad9" -> "9.9.9.9" to "https://dns.quad9.net/dns-query"
-    else -> "0.0.0.0" to ""
+private data class DnsProviderValue(val primary: String, val fallback: String, val dohUrl: String)
+
+private fun dnsProviderValues(id: String): DnsProviderValue = when (id) {
+    "adguard" -> DnsProviderValue("94.140.14.14", "94.140.15.15", "https://dns.adguard-dns.com/dns-query")
+    "cloudflare" -> DnsProviderValue("1.1.1.1", "1.0.0.1", "https://cloudflare-dns.com/dns-query")
+    "cloudflare_family" -> DnsProviderValue("1.1.1.3", "1.0.0.3", "https://family.cloudflare-dns.com/dns-query")
+    "google" -> DnsProviderValue("8.8.8.8", "8.8.4.4", "https://dns.google/dns-query")
+    "mullvad" -> DnsProviderValue("194.242.2.2", "", "https://dns.mullvad.net/dns-query")
+    "opendns" -> DnsProviderValue("208.67.222.222", "208.67.220.220", "")
+    "opendns_family" -> DnsProviderValue("208.67.222.123", "208.67.220.123", "")
+    "quad9" -> DnsProviderValue("9.9.9.9", "149.112.112.112", "https://dns.quad9.net/dns-query")
+    else -> DnsProviderValue("", "", "")
 }
