@@ -35,29 +35,6 @@ func isAdmin() bool {
 	return windows.GetCurrentProcessToken().IsElevated()
 }
 
-func (m *Manager) takeOverDNS() error {
-	if runtime.GOOS != "windows" {
-		return nil
-	}
-	if !isAdmin() {
-		return errors.New("administrator privileges are required to change Windows DNS")
-	}
-	capture := `$a=Get-NetAdapter|Where-Object{$_.Status -eq 'Up' -and $_.Name -ne 'BlockAds'};$o=@();foreach($x in $a){$c=Get-CimInstance Win32_NetworkAdapterConfiguration|? InterfaceIndex -eq $x.InterfaceIndex|select -First 1;$v4=(Get-DnsClientServerAddress -InterfaceIndex $x.InterfaceIndex -AddressFamily IPv4).ServerAddresses;$v6=(Get-DnsClientServerAddress -InterfaceIndex $x.InterfaceIndex -AddressFamily IPv6).ServerAddresses;$o+=[pscustomobject]@{Index=$x.InterfaceIndex;Alias=$x.Name;DHCP=[bool]$c.DHCPEnabled;V4=@($v4);V6=@($v6)}};$o|ConvertTo-Json -Compress -Depth 5`
-	out, err := hiddenCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", capture).Output()
-	if err != nil {
-		return fmt.Errorf("capture DNS: %w", err)
-	}
-	if err = os.WriteFile(m.dnsBackupPath, out, 0600); err != nil {
-		return err
-	}
-	setcmd := `Get-NetAdapter|Where-Object{$_.Status -eq 'Up' -and $_.Name -ne 'BlockAds'}|ForEach-Object{Set-DnsClientServerAddress -InterfaceIndex $_.InterfaceIndex -ServerAddresses @('127.0.0.1') -ErrorAction Stop};Clear-DnsClientCache`
-	b, err := hiddenCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", setcmd).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("set DNS: %v: %s", err, string(b))
-	}
-	return nil
-}
-
 func (m *Manager) restoreDNS() error {
 	if runtime.GOOS != "windows" {
 		return nil
@@ -103,3 +80,4 @@ func (m *Manager) restoreDNS() error {
 	_ = os.Remove(m.dnsBackupPath)
 	return nil
 }
+

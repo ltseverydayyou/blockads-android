@@ -186,7 +186,6 @@ func (e *Engine) StartFull(fd int, protector SocketProtector) {
 
 	e.mu.Lock()
 	e.tunFile = tunFile
-	e.tcpStack = stack
 	e.mu.Unlock()
 
 	if err := stack.Start(btun, uint32(defaultTunMTU)); err != nil {
@@ -199,6 +198,9 @@ func (e *Engine) StartFull(fd int, protector SocketProtector) {
 		fail("StartFull: stack start failed: %v", err)
 		return
 	}
+	e.mu.Lock()
+	e.tcpStack = stack
+	e.mu.Unlock()
 
 	logf("StartFull: full-network stack running (direct TUN read, async TUN write, mtu=%d)", defaultTunMTU)
 
@@ -207,6 +209,16 @@ func (e *Engine) StartFull(fd int, protector SocketProtector) {
 	<-done
 	btun.halt()
 	logf("StartFull: stopped")
+}
+
+// IsFullTunnelReady reports whether the full-network stack has completed
+// startup. IsRunning becomes true before stack.Start so Stop can interrupt
+// initialization; callers that are about to install routes must wait for the
+// stack itself to be ready.
+func (e *Engine) IsFullTunnelReady() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.running && e.tcpStack != nil
 }
 
 // newFullTunnelUdpHandler routes UDP flows for full-network mode: DNS
@@ -254,6 +266,18 @@ func newFullPassthroughTcpHandler(engine *Engine, uidr UIDResolver, protectFn fu
 	return func(conn adapter.TCPConn) {
 		defer conn.Close()
 		flow := tcpFlowID(conn)
+		// Keep DNS inside the same filtering pipeline for clients that use
+		// TCP fallback (large answers, DNSSEC, or blocked UDP). Android's
+		// full-tunnel path handles DNS this way; Windows must do the same.
+		if flow.serverPort == 53 {
+			handleDNSOverTCP(conn, engine)
+			return
+		}
+		// DoT would otherwise bypass domain filtering entirely. Closing it
+		// makes clients fall back to the intercepted plaintext DNS path.
+		if flow.serverPort == 853 {
+			return
+		}
 		engine.logConnection(flow, ProtocolTCP)
 		relayDirectFromFlow(conn, flow, engine, protectFn)
 	}
@@ -297,6 +321,39 @@ func handleDNSOverUDP(conn adapter.UDPConn, engine *Engine) {
 	}
 }
 
+// handleDNSOverTCP reads length-prefixed DNS messages from a stack TCP flow,
+// runs each through engine.ServeDNS, and writes the filtered response back.
+func handleDNSOverTCP(conn adapter.TCPConn, engine *Engine) {
+	appName := engine.appNameForFlow(tcpFlowID(conn), ProtocolTCP)
+	dnsConn := &dns.Conn{Conn: conn}
+	writer := &tcpDNSResponseWriter{conn: dnsConn}
+	for {
+		req, err := dnsConn.ReadMsg()
+		if err != nil {
+			return
+		}
+		if req == nil {
+			continue
+		}
+		engine.serveDNS(writer, req, appName)
+	}
+}
+
+type tcpDNSResponseWriter struct {
+	conn *dns.Conn
+}
+
+func (w *tcpDNSResponseWriter) LocalAddr() net.Addr  { return w.conn.LocalAddr() }
+func (w *tcpDNSResponseWriter) RemoteAddr() net.Addr { return w.conn.RemoteAddr() }
+func (w *tcpDNSResponseWriter) WriteMsg(m *dns.Msg) error {
+	return w.conn.WriteMsg(m)
+}
+func (w *tcpDNSResponseWriter) Write(b []byte) (int, error) { return w.conn.Write(b) }
+func (w *tcpDNSResponseWriter) Close() error                { return nil }
+func (w *tcpDNSResponseWriter) TsigStatus() error           { return nil }
+func (w *tcpDNSResponseWriter) TsigTimersOnly(bool)         {}
+func (w *tcpDNSResponseWriter) Hijack()                     {}
+
 // udpDNSResponseWriter adapts a stack UDP flow to dns.ResponseWriter so
 // engine.ServeDNS can reply on it. Only the methods ServeDNS actually
 // uses (WriteMsg, RemoteAddr) do real work; the rest are minimal
@@ -325,3 +382,4 @@ func (w *udpDNSResponseWriter) Close() error        { return nil }
 func (w *udpDNSResponseWriter) TsigStatus() error   { return nil }
 func (w *udpDNSResponseWriter) TsigTimersOnly(bool) {}
 func (w *udpDNSResponseWriter) Hijack()             {}
+

@@ -14,7 +14,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/miekg/dns"
 	tunnel "github.com/nqmgaming/blockads-tunnel"
 	"golang.org/x/sys/windows"
 	wgtun "golang.zx2c4.com/wireguard/tun"
@@ -23,6 +22,9 @@ import (
 const (
 	blockAdsInterfaceName = "BlockAds"
 	blockAdsIPv4          = "10.254.0.2"
+	blockAdsDNS           = "10.254.0.1"
+	blockAdsIPv6          = "fd00:ad:beef::2"
+	blockAdsDNSIPv6       = "fd00:ad:beef::1"
 	blockAdsMTU           = 1500
 	ipUnicastIf           = 31
 	ipv6UnicastIf         = 31
@@ -93,26 +95,6 @@ func bindSocketToInterface4(handle windows.Handle, index uint32) error {
 	return windows.SetsockoptInt(handle, windows.IPPROTO_IP, ipUnicastIf, int(networkOrder))
 }
 
-func startLoopbackDNS(e *tunnel.Engine) (func() error, error) {
-	handler := dns.HandlerFunc(e.ServeDNS)
-	udpConn, err := net.ListenPacket("udp4", "127.0.0.1:53")
-	if err != nil {
-		return nil, fmt.Errorf("listen loopback DNS UDP: %w", err)
-	}
-	tcpListener, err := net.Listen("tcp4", "127.0.0.1:53")
-	if err != nil {
-		_ = udpConn.Close()
-		return nil, fmt.Errorf("listen loopback DNS TCP: %w", err)
-	}
-	udpServer := &dns.Server{PacketConn: udpConn, Net: "udp", Handler: handler}
-	tcpServer := &dns.Server{Listener: tcpListener, Net: "tcp", Handler: handler}
-	go func() { _ = udpServer.ActivateAndServe() }()
-	go func() { _ = tcpServer.ActivateAndServe() }()
-	return func() error {
-		return errors.Join(udpServer.Shutdown(), tcpServer.Shutdown())
-	}, nil
-}
-
 func activePhysicalRoute() (physicalRoute, error) {
 	const script = `$ErrorActionPreference='Stop';$r=Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0'|Where-Object{$_.InterfaceAlias -ne 'BlockAds' -and $_.NextHop -ne '0.0.0.0'}|ForEach-Object{$i=Get-NetIPInterface -AddressFamily IPv4 -InterfaceIndex $_.InterfaceIndex -ErrorAction SilentlyContinue;[pscustomobject]@{InterfaceIndex=[uint32]$_.InterfaceIndex;InterfaceAlias=$_.InterfaceAlias;NextHop=$_.NextHop;Metric=[int]($_.RouteMetric+$i.InterfaceMetric)}}|Sort-Object Metric|Select-Object -First 1;if($null -eq $r){throw 'No physical IPv4 default route found'};$r|ConvertTo-Json -Compress`
 	out, err := hiddenCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).Output()
@@ -142,7 +124,10 @@ func waitForInterface(name string) (*net.Interface, error) {
 }
 
 func configureWintun(index int) error {
-	script := fmt.Sprintf(`$ErrorActionPreference='Stop';$idx=%d;Get-NetRoute -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue|Where-Object{$_.DestinationPrefix -eq '0.0.0.0/0'}|Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue;Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue|Where-Object{$_.IPAddress -eq '%s'}|Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue;New-NetIPAddress -InterfaceIndex $idx -IPAddress '%s' -PrefixLength 32 -AddressFamily IPv4 -SkipAsSource $false -PolicyStore ActiveStore|Out-Null;Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -InterfaceMetric 1 -NlMtuBytes %d;Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses @('127.0.0.1');New-NetRoute -InterfaceIndex $idx -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop '0.0.0.0' -RouteMetric 0 -PolicyStore ActiveStore|Out-Null;Clear-DnsClientCache`, index, blockAdsIPv4, blockAdsIPv4, blockAdsMTU)
+	// Keep physical adapter DNS settings untouched. The virtual adapter is
+	// assigned an on-link resolver address; DNS packets sent there enter the
+	// full tunnel and are handled by the engine's UDP/TCP port-53 handlers.
+	script := fmt.Sprintf(`$ErrorActionPreference='Stop';$idx=%d;Get-NetRoute -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue|Where-Object{$_.DestinationPrefix -eq '0.0.0.0/0'}|Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue;Get-NetRoute -InterfaceIndex $idx -AddressFamily IPv6 -ErrorAction SilentlyContinue|Where-Object{$_.DestinationPrefix -eq '::/0'}|Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue;Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue|Where-Object{$_.IPAddress -eq '%s' -or $_.IPAddress -eq '%s'}|Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue;Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv6 -ErrorAction SilentlyContinue|Where-Object{$_.IPAddress -eq '%s' -or $_.IPAddress -eq '%s'}|Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue;New-NetIPAddress -InterfaceIndex $idx -IPAddress '%s' -PrefixLength 24 -AddressFamily IPv4 -SkipAsSource $false -PolicyStore ActiveStore|Out-Null;New-NetIPAddress -InterfaceIndex $idx -IPAddress '%s' -PrefixLength 64 -AddressFamily IPv6 -SkipAsSource $false -PolicyStore ActiveStore|Out-Null;Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -InterfaceMetric 1 -NlMtuBytes %d;Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv6 -InterfaceMetric 1 -NlMtuBytes %d;Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses @('%s','%s');New-NetRoute -InterfaceIndex $idx -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -NextHop '0.0.0.0' -RouteMetric 0 -PolicyStore ActiveStore|Out-Null;New-NetRoute -InterfaceIndex $idx -AddressFamily IPv6 -DestinationPrefix '::/0' -NextHop '::' -RouteMetric 0 -PolicyStore ActiveStore|Out-Null;Clear-DnsClientCache`, index, blockAdsIPv4, blockAdsDNS, blockAdsIPv6, blockAdsDNSIPv6, blockAdsIPv4, blockAdsIPv6, blockAdsMTU, blockAdsMTU, blockAdsDNS, blockAdsDNSIPv6)
 	out, err := hiddenCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("configure BlockAds Wintun: %w: %s", err, strings.TrimSpace(string(out)))
@@ -151,7 +136,7 @@ func configureWintun(index int) error {
 }
 
 func cleanupWintun(index int) error {
-	script := fmt.Sprintf(`$idx=%d;Get-NetRoute -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue|Where-Object{$_.DestinationPrefix -eq '0.0.0.0/0'}|Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue;Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses -ErrorAction SilentlyContinue;Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue|Where-Object{$_.IPAddress -eq '%s'}|Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue;Clear-DnsClientCache`, index, blockAdsIPv4)
+	script := fmt.Sprintf(`$idx=%d;Get-NetRoute -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue|Where-Object{$_.DestinationPrefix -eq '0.0.0.0/0'}|Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue;Get-NetRoute -InterfaceIndex $idx -AddressFamily IPv6 -ErrorAction SilentlyContinue|Where-Object{$_.DestinationPrefix -eq '::/0'}|Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue;Set-DnsClientServerAddress -InterfaceIndex $idx -ResetServerAddresses -ErrorAction SilentlyContinue;Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue|Where-Object{$_.IPAddress -eq '%s' -or $_.IPAddress -eq '%s'}|Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue;Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv6 -ErrorAction SilentlyContinue|Where-Object{$_.IPAddress -eq '%s' -or $_.IPAddress -eq '%s'}|Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue;Clear-DnsClientCache`, index, blockAdsIPv4, blockAdsDNS, blockAdsIPv6, blockAdsDNSIPv6)
 	out, err := hiddenCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("cleanup BlockAds Wintun: %w: %s", err, strings.TrimSpace(string(out)))
@@ -181,29 +166,24 @@ func startWindowsFullTunnel(e *tunnel.Engine) (func() error, error) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if e.IsRunning() {
+		if e.IsFullTunnelReady() {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !e.IsRunning() {
+	if !e.IsFullTunnelReady() {
 		_ = packetDevice.Close()
 		return nil, errors.New("BlockAds full-tunnel engine did not start")
 	}
 
-	dnsCleanup, err := startLoopbackDNS(e)
-	if err != nil {
-		e.Stop()
-		return nil, err
-	}
 	if err := configureWintun(ifc.Index); err != nil {
-		_ = dnsCleanup()
 		e.Stop()
 		_ = cleanupWintun(ifc.Index)
 		return nil, err
 	}
 
 	return func() error {
-		return errors.Join(cleanupWintun(ifc.Index), dnsCleanup())
+		return cleanupWintun(ifc.Index)
 	}, nil
 }
+

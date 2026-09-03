@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -56,7 +57,8 @@ type Resolver struct {
 	splitZones []string // Zone suffixes (e.g., ["internal", "local", "lan"])
 
 	// HTTP client for DoH (reusable)
-	httpClient *http.Client
+	httpClient       *http.Client
+	endpointResolver *net.Resolver
 	// QUIC connection for DoQ (reusable)
 	quicConn   quic.Connection
 	quicMu     sync.Mutex
@@ -71,17 +73,25 @@ const (
 	connectTimeout    = 3 * time.Second
 )
 
+// These addresses are only used to bootstrap the hostname of an encrypted
+// DNS provider. They are dialled through protectSocketFn, so full-tunnel mode
+// reaches them on the physical interface instead of resolving them through
+// the DNS listener that is currently being served by this engine.
+var endpointBootstrapServers = []string{"1.1.1.1:53", "8.8.8.8:53"}
+
 // NewResolver creates a new DNS resolver.
 func NewResolver(protectFn func(fd int) bool) *Resolver {
+	endpointResolver := newEndpointResolver(protectFn)
 	return &Resolver{
-		protectSocketFn: protectFn,
-		httpClient:      buildDoHClient(protectFn),
+		protectSocketFn:  protectFn,
+		httpClient:       buildDoHClient(protectFn, endpointResolver),
+		endpointResolver: endpointResolver,
 	}
 }
 
 // buildDoHClient creates an HTTP client with protected sockets for DoH.
-func buildDoHClient(protectFn func(fd int) bool) *http.Client {
-	dialer := &protectedDialer{protectFn: protectFn}
+func buildDoHClient(protectFn func(fd int) bool, resolver *net.Resolver) *http.Client {
+	dialer := &protectedDialer{protectFn: protectFn, resolver: resolver}
 	transport := &http.Transport{
 		DialContext:         dialer.DialContext,
 		ForceAttemptHTTP2:   true,
@@ -93,6 +103,30 @@ func buildDoHClient(protectFn func(fd int) bool) *http.Client {
 	return &http.Client{
 		Transport: transport,
 		Timeout:   queryTimeoutDoH,
+	}
+}
+
+// newEndpointResolver creates a resolver whose own DNS transport is protected
+// and bootstrapped against fixed public DNS IPs. Using net.DefaultResolver
+// here would recurse once Windows routes DNS into the BlockAds tunnel.
+func newEndpointResolver(protectFn func(fd int) bool) *net.Resolver {
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var lastErr error
+			for _, server := range endpointBootstrapServers {
+				dialer := &net.Dialer{Timeout: connectTimeout, Control: protectedControl(protectFn)}
+				conn, err := dialer.DialContext(ctx, network, server)
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
+			}
+			if lastErr == nil {
+				lastErr = errors.New("no endpoint bootstrap DNS servers configured")
+			}
+			return nil, fmt.Errorf("endpoint bootstrap DNS: %w", lastErr)
+		},
 	}
 }
 
@@ -310,7 +344,7 @@ func (r *Resolver) queryDoT(rawQuery []byte, server string) ([]byte, error) {
 	dialer := &net.Dialer{Timeout: connectTimeout, Control: protectedControl(r.protectSocketFn)}
 
 	// Resolve hostname first to protect the TCP socket
-	ips, err := net.LookupHost(host)
+	ips, err := r.resolveEndpointHost(host)
 	if err != nil || len(ips) == 0 {
 		return nil, fmt.Errorf("DoT resolve %s: %w", host, err)
 	}
@@ -421,7 +455,7 @@ func (r *Resolver) getOrCreateQUICConn(host, port string) (quic.Connection, erro
 	}
 
 	// Resolve hostname
-	ips, err := net.LookupHost(host)
+	ips, err := r.resolveEndpointHost(host)
 	if err != nil || len(ips) == 0 {
 		return nil, fmt.Errorf("DoQ resolve %s: %w", host, err)
 	}
@@ -467,6 +501,24 @@ func (r *Resolver) getOrCreateQUICConn(host, port string) (quic.Connection, erro
 	r.quicConn = conn
 	r.quicServer = addr
 	return conn, nil
+}
+
+// resolveEndpointHost resolves only the endpoint of an encrypted DNS
+// provider. It deliberately avoids the process/system resolver because that
+// resolver can point back at the BlockAds DNS interception path.
+func (r *Resolver) resolveEndpointHost(host string) ([]string, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		return []string{ip.String()}, nil
+	}
+	r.mu.RLock()
+	resolver := r.endpointResolver
+	r.mu.RUnlock()
+	if resolver == nil {
+		return nil, errors.New("endpoint resolver is not initialized")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+	defer cancel()
+	return resolver.LookupHost(ctx, host)
 }
 
 // resetQUICConn closes and clears the QUIC connection.
@@ -542,9 +594,11 @@ func parseDoQURL(url string) (host, port string) {
 // protectedDialer wraps net.Dialer to protect sockets from VPN routing loop.
 type protectedDialer struct {
 	protectFn func(fd int) bool
+	resolver  *net.Resolver
 }
 
 func (d *protectedDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	dialer := &net.Dialer{Timeout: connectTimeout, Control: protectedControl(d.protectFn)}
+	dialer := &net.Dialer{Timeout: connectTimeout, Control: protectedControl(d.protectFn), Resolver: d.resolver}
 	return dialer.DialContext(ctx, network, addr)
 }
+

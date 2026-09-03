@@ -21,4 +21,5 @@ The build script:
 
 Outputs are written to `windows/dist/`.
 
-System-wide protection creates a Wintun `BlockAds` virtual adapter and routes IPv4 traffic through the repository's existing full-tunnel gVisor/filter engine. The backend binds its own upstream sockets to the physical interface to avoid VPN routing loops. Direct mode intentionally leaves IPv6 on the physical connection, matching the Android direct-mode behavior. Creating the adapter and routes requires administrator privileges.
+System-wide protection creates a Wintun `BlockAds` virtual adapter and routes IPv4 and IPv6 traffic through the repository's existing full-tunnel gVisor/filter engine. The virtual adapter advertises internal DNS addresses (`10.254.0.1` and `fd00:ad:beef::1`), so DNS is intercepted inside the tunnel like Android; physical adapter DNS settings are never rewritten. The backend binds its own upstream sockets to the physical interface to avoid VPN routing loops. Creating the adapter and routes requires administrator privileges.
+

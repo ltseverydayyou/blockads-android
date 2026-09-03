@@ -104,9 +104,16 @@ func (m *Manager) loadEnabledFilters(force bool) (int, error) {
 	var adTries, secTries, adBlooms, secBlooms []string
 	var cssParts, scriptParts []string
 	total := 0
+	enabledFilters := 0
+	loadedFilters := 0
 	for i := range filters {
 		f := &filters[i]
-		if !f.Enabled || f.TrieURL == "" || f.BloomURL == "" {
+		if !f.Enabled {
+			continue
+		}
+		enabledFilters++
+		if f.TrieURL == "" || f.BloomURL == "" {
+			log.Printf("filter %s has no compiled trie/bloom metadata", f.Name)
 			continue
 		}
 		triePath := filepath.Join(m.filtersDir, f.ID+".trie")
@@ -143,6 +150,7 @@ func (m *Manager) loadEnabledFilters(force bool) (int, error) {
 			}
 		}
 		f.LastUpdated = time.Now().UnixMilli()
+		loadedFilters++
 		total += f.RuleCount
 	}
 	m.mu.Lock()
@@ -153,6 +161,9 @@ func (m *Manager) loadEnabledFilters(force bool) (int, error) {
 		eng.SetTries(strings.Join(adTries, ","), strings.Join(secTries, ","), strings.Join(adBlooms, ","), strings.Join(secBlooms, ","))
 		eng.SetCosmeticCSS(strings.Join(cssParts, "\n"))
 		eng.SetScriptletRules(strings.Join(scriptParts, "\n"))
+	}
+	if enabledFilters > 0 && loadedFilters == 0 {
+		return total, fmt.Errorf("no enabled filter lists could be loaded")
 	}
 	return total, nil
 }
@@ -315,3 +326,4 @@ func (m *Manager) compileLocally(f *FilterList) error {
 	f.RuleCount = count
 	return nil
 }
+

@@ -70,9 +70,6 @@ func (e *Engine) StartFullDevice(device PacketDevice, protector SocketProtector)
 	logf("StartFullDevice: mitm=%t", mitmActive)
 
 	btun := newBufferedTun(device)
-	e.mu.Lock()
-	e.tcpStack = stack
-	e.mu.Unlock()
 
 	if err := stack.Start(btun, uint32(defaultTunMTU)); err != nil {
 		btun.halt()
@@ -82,9 +79,13 @@ func (e *Engine) StartFullDevice(device PacketDevice, protector SocketProtector)
 		fail("StartFullDevice: stack start failed: %v", err)
 		return
 	}
+	e.mu.Lock()
+	e.tcpStack = stack
+	e.mu.Unlock()
 
 	logf("StartFullDevice: full-network stack running through Wintun (mtu=%d)", defaultTunMTU)
 	<-done
 	btun.halt()
 	logf("StartFullDevice: stopped")
 }
+

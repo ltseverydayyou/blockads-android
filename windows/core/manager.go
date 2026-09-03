@@ -117,7 +117,7 @@ func newManager() (*Manager, error) {
 			m.ids.log.Store(e.ID)
 		}
 	}
-	if len(m.filters) == 0 {
+	if len(m.filters) == 0 || m.filtersNeedSync() {
 		if err := m.syncFilters(); err != nil {
 			log.Printf("initial filter sync: %v", err)
 		}
@@ -125,6 +125,18 @@ func newManager() (*Manager, error) {
 	}
 	m.startAutoUpdater()
 	return m, nil
+}
+
+// filtersNeedSync detects filter metadata written by older Windows builds.
+// Those builds could persist enabled built-ins without their compiled trie and
+// bloom URLs, which made the app appear active while loading no blocking data.
+func (m *Manager) filtersNeedSync() bool {
+	for _, f := range m.filters {
+		if f.BuiltIn && f.Enabled && (f.TrieURL == "" || f.BloomURL == "") {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) loadJSON(path string, dst any) {
@@ -194,6 +206,10 @@ func (m *Manager) start(useSystemDNS bool) error {
 	m.mu.Unlock()
 	m.configureEngine(e)
 	if _, err := m.loadEnabledFilters(false); err != nil {
+		e.Stop()
+		m.mu.Lock()
+		m.engine = nil
+		m.mu.Unlock()
 		return err
 	}
 	var cleanup func() error
@@ -205,15 +221,6 @@ func (m *Manager) start(useSystemDNS bool) error {
 		cleanup, err = startWindowsFullTunnel(e)
 		if err != nil {
 			e.Stop()
-			m.mu.Lock()
-			m.engine = nil
-			m.mu.Unlock()
-			return err
-		}
-		if err = m.takeOverDNS(); err != nil {
-			_ = m.restoreDNS()
-			e.Stop()
-			_ = cleanup()
 			m.mu.Lock()
 			m.engine = nil
 			m.mu.Unlock()
@@ -388,3 +395,4 @@ func (m *Manager) debugSummary() string {
 	defer m.mu.RUnlock()
 	return fmt.Sprintf("running=%v filters=%d rules=%d logs=%d", m.running, len(m.filters), len(m.rules), len(m.logs))
 }
+
