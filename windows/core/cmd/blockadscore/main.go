@@ -194,6 +194,7 @@ func (s *server) routes() http.Handler {
 		writeJSON(w, 200, map[string]bool{"ok": true})
 		go func() {
 			time.Sleep(100 * time.Millisecond)
+			_ = s.m.Stop(true)
 			os.Exit(0)
 		}()
 	})
@@ -210,6 +211,7 @@ func main() {
 	if !ensureElevated() {
 		return
 	}
+	startDNSCleanupWatchdog()
 	m, err := core.NewManager()
 	if err != nil {
 		log.Fatal(err)

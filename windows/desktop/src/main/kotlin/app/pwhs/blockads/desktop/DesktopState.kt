@@ -24,6 +24,7 @@ class DesktopState {
         runCatching {
             BackendClient.ensureRunning()
             refreshAll()
+            StartupManager.sync(settings.startWithWindows)
         }.onFailure { message = it.message ?: it.toString() }
         loading = false
     }
@@ -99,10 +100,19 @@ class DesktopState {
             settings = next
             busy = true
             message = null
+            val startupChanged = next.startWithWindows != previous.startWithWindows
+            var startupApplied = false
             try {
+                if (startupChanged) {
+                    StartupManager.sync(next.startWithWindows)
+                    startupApplied = true
+                }
                 settings = BackendClient.saveSettings(next)
                 status = BackendClient.status()
             } catch (t: Throwable) {
+                if (startupApplied) {
+                    runCatching { StartupManager.sync(previous.startWithWindows) }
+                }
                 settings = previous
                 message = t.message ?: t.toString()
             } finally {

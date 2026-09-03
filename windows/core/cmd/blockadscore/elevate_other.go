@@ -2,4 +2,5 @@
 
 package main
 
-func ensureElevated() bool { return true }
+func ensureElevated() bool     { return true }
+func startDNSCleanupWatchdog() {}
