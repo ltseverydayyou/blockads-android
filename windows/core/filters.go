@@ -96,6 +96,51 @@ func (m *Manager) download(url, path string, force bool) error {
 	return os.Rename(tmp, path)
 }
 
+const dnsFilterCompilerVersion = "2"
+
+func (m *Manager) ensureSafeLocalDNSFilter(f *FilterList, force bool) error {
+	sourceURL := strings.TrimSpace(f.OriginalURL)
+	if sourceURL == "" {
+		sourceURL = strings.TrimSpace(f.URL)
+	}
+	if sourceURL == "" {
+		return errors.New("filter has no original source URL")
+	}
+
+	triePath := filepath.Join(m.filtersDir, f.ID+".trie")
+	bloomPath := filepath.Join(m.filtersDir, f.ID+".bloom")
+	markerPath := filepath.Join(m.filtersDir, f.ID+".dns-compiler")
+
+	if !force {
+		marker, markerErr := os.ReadFile(markerPath)
+		trieInfo, trieErr := os.Stat(triePath)
+		bloomInfo, bloomErr := os.Stat(bloomPath)
+		if markerErr == nil && strings.TrimSpace(string(marker)) == dnsFilterCompilerVersion &&
+			trieErr == nil && trieInfo.Size() > 0 && bloomErr == nil && bloomInfo.Size() > 0 {
+			f.TrieURL = "local://" + f.ID + ".trie"
+			f.BloomURL = "local://" + f.ID + ".bloom"
+			return nil
+		}
+	}
+
+	tmp := filepath.Join(m.dataDir, "compile_builtin_"+f.ID+".txt")
+	defer os.Remove(tmp)
+	if err := m.download(sourceURL, tmp, true); err != nil {
+		return err
+	}
+	count, err := tunnel.CompileFilterList(tmp, triePath, bloomPath)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(markerPath, []byte(dnsFilterCompilerVersion+"\n"), 0644); err != nil {
+		return err
+	}
+	f.TrieURL = "local://" + f.ID + ".trie"
+	f.BloomURL = "local://" + f.ID + ".bloom"
+	f.RuleCount = count
+	return nil
+}
+
 func (m *Manager) loadEnabledFilters(force bool) (int, error) {
 	m.mu.RLock()
 	filters := append([]FilterList(nil), m.filters...)
@@ -112,6 +157,12 @@ func (m *Manager) loadEnabledFilters(force bool) (int, error) {
 			continue
 		}
 		enabledFilters++
+		if f.BuiltIn {
+			if err := m.ensureSafeLocalDNSFilter(f, force); err != nil {
+				log.Printf("filter %s safe local compile: %v", f.Name, err)
+				continue
+			}
+		}
 		if f.TrieURL == "" || f.BloomURL == "" {
 			log.Printf("filter %s has no compiled trie/bloom metadata", f.Name)
 			continue
@@ -218,10 +269,13 @@ func (m *Manager) addCustomFilter(name, url string) (FilterList, error) {
 	id := "custom_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	f := FilterList{ID: id, Name: name, URL: url, OriginalURL: url, Description: "Custom filter", Enabled: true, Category: "AD", LastUpdated: time.Now().UnixMilli()}
 	if err := m.compileViaBackend(&f); err != nil {
-		log.Printf("custom compiler API failed, using exact local Go compiler fallback: %v", err)
-		if err = m.compileLocally(&f); err != nil {
-			return FilterList{}, err
-		}
+		log.Printf("custom compiler API assets unavailable: %v", err)
+	}
+	// Always rebuild trie/bloom locally with the DNS-safe compiler. The backend
+	// may still provide cosmetic/scriptlet assets, but its DNS trie must not
+	// globalize contextual EasyList rules.
+	if err := m.compileLocally(&f); err != nil {
+		return FilterList{}, err
 	}
 	m.mu.Lock()
 	m.filters = append(m.filters, f)
@@ -326,4 +380,3 @@ func (m *Manager) compileLocally(f *FilterList) error {
 	f.RuleCount = count
 	return nil
 }
-

@@ -94,11 +94,21 @@ func parseDomainLine(line string) string {
 	// AdBlock Plus format: ||domain.com^
 	case strings.HasPrefix(line, "||"):
 		domain = strings.TrimPrefix(line, "||")
-		// Reject rules with wildcards/paths
-		if strings.ContainsAny(domain, "/*?") {
+		// DNS filtering has no request-context information. Any ABP options can
+		// narrow a rule by source domain, resource type, or first/third-party
+		// context, so compiling such a rule as a global DNS block over-blocks.
+		if strings.Contains(domain, "$") {
+			return ""
+		}
+		// Only compile host-only rules. Paths, wildcards, query patterns and
+		// other URL syntax belong to the HTTP/HTTPS filtering layer.
+		if strings.ContainsAny(domain, "/*?|#") {
 			return ""
 		}
 		if idx := strings.IndexByte(domain, '^'); idx != -1 {
+			if idx != len(domain)-1 {
+				return ""
+			}
 			domain = domain[:idx]
 		}
 
@@ -121,22 +131,37 @@ func parseDomainLine(line string) string {
 		}
 	}
 
-	domain = strings.TrimSpace(strings.ToLower(domain))
+	domain = strings.TrimSuffix(strings.TrimSpace(strings.ToLower(domain)), ".")
 
-	// Validate
-	if domain == "" || !strings.Contains(domain, ".") {
+	if !isValidFilterDomain(domain) {
 		return ""
+	}
+	return domain
+}
+
+func isValidFilterDomain(domain string) bool {
+	if domain == "" || len(domain) > 253 || !strings.Contains(domain, ".") {
+		return false
 	}
 	if domain == "localhost" || domain == "localhost.localdomain" ||
-		domain == "local" || domain == "broadcasthost" {
-		return ""
-	}
-	// Reject IP addresses
-	if net.ParseIP(domain) != nil {
-		return ""
+		domain == "local" || domain == "broadcasthost" || net.ParseIP(domain) != nil {
+		return false
 	}
 
-	return domain
+	labels := strings.Split(domain, ".")
+	for _, label := range labels {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for i := 0; i < len(label); i++ {
+			c := label[i]
+			if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' {
+				continue
+			}
+			return false
+		}
+	}
+	return true
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

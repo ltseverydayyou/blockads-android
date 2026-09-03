@@ -35,7 +35,7 @@ func (m *Manager) Status() Status {
 	if checkSSID {
 		ssid = currentSSID()
 	}
-	return Status{Running: running, PausedTrusted: paused, Stats: m.stats(), FilterCount: filterCount, RuleCount: ruleCount, CurrentSSID: ssid, Admin: isAdmin(), Version: "1.1.0"}
+	return Status{Running: running, PausedTrusted: paused, Stats: m.stats(), FilterCount: filterCount, RuleCount: ruleCount, CurrentSSID: ssid, Admin: isAdmin(), Version: "1.2.0"}
 }
 
 func (m *Manager) Filters() []FilterList {

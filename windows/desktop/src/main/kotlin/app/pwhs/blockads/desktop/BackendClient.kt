@@ -20,7 +20,7 @@ class BackendException(message: String) : RuntimeException(message)
 
 object BackendClient {
     private const val base = "http://127.0.0.1:8754"
-    private const val expectedCoreVersion = "1.1.0"
+    private const val expectedCoreVersion = "1.2.0"
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()
     private var startedProcess: Process? = null
