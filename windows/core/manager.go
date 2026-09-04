@@ -312,13 +312,23 @@ func (m *Manager) start(useSystemDNS bool) error {
 }
 
 func (m *Manager) stop(restore bool) error {
+	return m.stopInternal(restore, true)
+}
+
+func (m *Manager) shutdown(restore bool) error {
+	return m.stopInternal(restore, false)
+}
+
+func (m *Manager) stopInternal(restore bool, disableProtection bool) error {
 	m.mu.Lock()
 	e := m.engine
 	cleanup := m.systemTunnelCleanup
 	m.systemTunnelCleanup = nil
 	m.engine = nil
 	m.running = false
-	m.settings.ProtectionEnabled = false
+	if disableProtection {
+		m.settings.ProtectionEnabled = false
+	}
 	m.mu.Unlock()
 	var err error
 	if restore {

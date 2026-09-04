@@ -49,19 +49,32 @@ object BackendClient {
         } ?: throw BackendException("Bundled wintun.dll is missing")
 
         val log = File(runtimeDir, "core.log")
-        startedProcess = ProcessBuilder(exe.absolutePath)
+        val launcher = ProcessBuilder(exe.absolutePath)
             .directory(runtimeDir)
             .redirectOutput(ProcessBuilder.Redirect.appendTo(log))
             .redirectError(ProcessBuilder.Redirect.appendTo(log))
             .start()
+        startedProcess = launcher
 
-        repeat(300) {
+        var launcherExitAt = 0L
+        while (true) {
             val ready = statusSync()
             if (ready?.admin == true && ready.version == expectedCoreVersion) return@withContext
+            if (!launcher.isAlive) {
+                if (launcherExitAt == 0L) launcherExitAt = System.nanoTime()
+                if (System.nanoTime() - launcherExitAt > 30_000_000_000L) {
+                    throw BackendException("Administrator approval was cancelled or BlockAdsCore failed to start. See ${log.absolutePath}")
+                }
+            }
             delay(100)
         }
-        throw BackendException("Administrator approval is required for BlockAds. See ${log.absolutePath}")
     }
+
+    fun persistedSettings(): Settings? = runCatching {
+        val file = File(System.getenv("LOCALAPPDATA") ?: ".", "BlockAds/settings.json")
+        if (!file.isFile) return@runCatching null
+        json.decodeFromString<Settings>(file.readText())
+    }.getOrNull()
 
     private fun statusSync(): Status? = try {
         val request = HttpRequest.newBuilder(URI("$base/status")).timeout(Duration.ofSeconds(1)).GET().build()

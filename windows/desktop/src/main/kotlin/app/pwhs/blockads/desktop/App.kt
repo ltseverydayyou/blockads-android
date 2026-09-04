@@ -1,6 +1,8 @@
 package app.pwhs.blockads.desktop
 
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -11,6 +13,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,6 +42,7 @@ fun BlockAdsDesktopApp(state: DesktopState) {
     val snackbar = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) { state.initialize() }
+    LaunchedEffect(Unit) { state.checkForUpdate() }
     LaunchedEffect(Unit) {
         while (true) {
             delay(1500)
@@ -50,6 +54,23 @@ fun BlockAdsDesktopApp(state: DesktopState) {
     }
     LaunchedEffect(state.message) {
         state.message?.let { snackbar.showSnackbar(it); state.message = null }
+    }
+
+    state.availableUpdate?.let { update ->
+        AlertDialog(
+            onDismissRequest = { state.availableUpdate = null },
+            title = { Text("BlockAds update available") },
+            text = { Text("${update.name} is available. You are currently using Windows v${UpdateChecker.currentVersion}.") },
+            confirmButton = {
+                Button(onClick = {
+                    UpdateChecker.open(update)
+                    state.availableUpdate = null
+                }) { Text("Download update") }
+            },
+            dismissButton = {
+                TextButton(onClick = { state.availableUpdate = null }) { Text("Later") }
+            },
+        )
     }
 
     if (state.loading) {

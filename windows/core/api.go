@@ -10,6 +10,7 @@ import (
 func NewManager() (*Manager, error)               { return newManager() }
 func (m *Manager) Start(useSystemDNS bool) error  { return m.start(useSystemDNS) }
 func (m *Manager) Stop(restoreDNS bool) error     { return m.stop(restoreDNS) }
+func (m *Manager) Shutdown(restoreDNS bool) error { return m.shutdown(restoreDNS) }
 func (m *Manager) ApplySettings(s Settings) error { return m.applySettings(s) }
 func (m *Manager) Stats() Stats                   { return m.stats() }
 func (m *Manager) DebugSummary() string           { return m.debugSummary() }

@@ -194,7 +194,7 @@ func (s *server) routes() http.Handler {
 		writeJSON(w, 200, map[string]bool{"ok": true})
 		go func() {
 			time.Sleep(100 * time.Millisecond)
-			_ = s.m.Stop(true)
+			_ = s.m.Shutdown(true)
 			os.Exit(0)
 		}()
 	})
@@ -215,6 +215,11 @@ func main() {
 	m, err := core.NewManager()
 	if err != nil {
 		log.Fatal(err)
+	}
+	if m.Settings().ProtectionEnabled {
+		if err := m.Start(true); err != nil {
+			log.Printf("restore protection state: %v", err)
+		}
 	}
 	s := &server{m: m}
 	srv := &http.Server{Addr: "127.0.0.1:8754", Handler: s.routes(), ReadHeaderTimeout: 5 * time.Second}

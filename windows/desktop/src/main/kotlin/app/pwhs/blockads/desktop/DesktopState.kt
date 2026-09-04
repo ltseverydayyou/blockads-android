@@ -16,17 +16,27 @@ class DesktopState {
     var loading by mutableStateOf(true)
     var busy by mutableStateOf(false)
     var message by mutableStateOf<String?>(null)
+    var availableUpdate by mutableStateOf<WindowsUpdate?>(null)
 
     private val settingsMutex = Mutex()
 
     suspend fun initialize() {
         loading = true
+        BackendClient.persistedSettings()?.let { persisted ->
+            settings = persisted
+            runCatching { StartupManager.sync(persisted.startWithWindows) }
+                .onFailure { message = it.message ?: it.toString() }
+        }
         runCatching {
             BackendClient.ensureRunning()
             refreshAll()
             StartupManager.sync(settings.startWithWindows)
         }.onFailure { message = it.message ?: it.toString() }
         loading = false
+    }
+
+    suspend fun checkForUpdate() {
+        availableUpdate = UpdateChecker.check()
     }
 
     suspend fun refreshAll() {
