@@ -21,5 +21,4 @@ The build script:
 
 Outputs are written to `windows/dist/`.
 
-System-wide protection creates a Wintun `BlockAds` virtual adapter and routes IPv4 and IPv6 traffic through the repository's existing full-tunnel gVisor/filter engine. The virtual adapter advertises internal DNS addresses (`10.254.0.1` and `fd00:ad:beef::1`), so DNS is intercepted inside the tunnel like Android; physical adapter DNS settings are never rewritten. The backend binds its own upstream sockets to the physical interface to avoid VPN routing loops. Creating the adapter and routes requires administrator privileges.
-
+System-wide protection runs the filtering engine as a loopback DNS service on port 53 and uses Windows NRPT to redirect DNS queries to `127.0.0.1` / `::1`. It does not create a Wintun adapter, replace the default IPv4/IPv6 route, or force application traffic through a userspace VPN. Games and other applications keep using the active physical network adapter directly. Administrator privileges are required to install and remove the NRPT rule.
