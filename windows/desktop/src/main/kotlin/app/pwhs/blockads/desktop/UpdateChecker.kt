@@ -27,7 +27,7 @@ data class WindowsUpdate(
 )
 
 object UpdateChecker {
-    const val currentVersion = "1.3.0"
+    const val currentVersion = "1.3.1"
     private const val releasesUrl = "https://api.github.com/repos/ltseverydayyou/blockads-android/releases?per_page=20"
     private val json = Json { ignoreUnknownKeys = true }
     private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
