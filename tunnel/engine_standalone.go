@@ -139,8 +139,6 @@ func (e *Engine) StartStandalone(port int) error {
 	}
 
 	e.running = true
-	e.totalQueries.Store(0)
-	e.blockedQueries.Store(0)
 
 	e.resolver = NewResolver(nil)
 	e.resolver.Configure(ParseProtocol(e.protocol), e.primaryDNS, e.fallbackDNS, e.dohURL)
@@ -162,6 +160,10 @@ func (e *Engine) StartStandalone(port int) error {
 	if oldResolver != nil {
 		oldResolver.Shutdown()
 	}
+
+	// Old handlers must finish before their counters are reset.
+	e.totalQueries.Store(0)
+	e.blockedQueries.Store(0)
 
 	addr4 := fmt.Sprintf("127.0.0.1:%d", port)
 	addr6 := fmt.Sprintf("[::1]:%d", port)
