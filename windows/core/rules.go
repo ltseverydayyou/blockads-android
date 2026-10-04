@@ -47,6 +47,10 @@ func (r *ruleChecker) snapshots() (map[string]struct{}, map[string]struct{}) {
 	return allow, block
 }
 func (r *ruleChecker) HasCustomRule(domain string) int {
+	if strings.TrimSuffix(strings.ToLower(domain), ".") == healthDomain {
+		return 1
+	}
+
 	a, b := r.snapshots()
 	if matchesDomainSet(domain, a) {
 		return 0
@@ -65,6 +69,11 @@ func (r *ruleChecker) GetBlockReason(domain string) string {
 }
 
 func (c *dnsLogCallback) OnDNSQuery(domain string, blocked bool, queryType int, responseTimeMS int64, appName, resolvedIP, blockedBy string) {
+	if domain == healthDomain {
+		c.m.healthQueries.Add(1)
+		return
+	}
+
 	c.m.mu.Lock()
 	if !c.m.settings.RecordDNSLogs {
 		c.m.mu.Unlock()

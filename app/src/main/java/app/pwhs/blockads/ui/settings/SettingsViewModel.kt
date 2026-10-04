@@ -14,11 +14,13 @@ import app.pwhs.blockads.data.dao.FirewallRuleDao
 import app.pwhs.blockads.data.dao.ProtectionProfileDao
 import app.pwhs.blockads.data.dao.WhitelistDomainDao
 import app.pwhs.blockads.data.datastore.AppPreferences
+import app.pwhs.blockads.data.entities.CustomDnsRule
 import app.pwhs.blockads.data.entities.FilterList
 import app.pwhs.blockads.data.entities.FilterListBackup
 import app.pwhs.blockads.data.entities.FirewallRule
 import app.pwhs.blockads.data.entities.FirewallRuleBackup
 import app.pwhs.blockads.data.entities.ProfileManager
+import app.pwhs.blockads.data.entities.RuleType
 import app.pwhs.blockads.data.entities.SettingsBackup
 import app.pwhs.blockads.data.entities.WhitelistDomain
 import app.pwhs.blockads.data.repository.FilterListRepository
@@ -60,9 +62,6 @@ class SettingsViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     val filterLists: StateFlow<List<FilterList>> = filterListDao.getAll()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val whitelistDomains: StateFlow<List<WhitelistDomain>> = whitelistDomainDao.getAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val crashReportingEnabled: StateFlow<Boolean> = appPrefs.crashReportingEnabled
@@ -111,21 +110,23 @@ class SettingsViewModel(
     val milestoneNotificationsEnabled: StateFlow<Boolean> = appPrefs.milestoneNotificationsEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
-    val upstreamDns: StateFlow<String> = appPrefs.upstreamDns
-        .stateIn(
-            viewModelScope,
-            SharingStarted.WhileSubscribed(5000),
-            AppPreferences.DEFAULT_UPSTREAM_DNS
-        )
+    val upstreamDns: StateFlow<String> = kotlinx.coroutines.flow.combine(
+        appPrefs.dnsProviderId,
+        appPrefs.upstreamDns
+    ) { id, upstream ->
+        if (id == AppPreferences.CUSTOM_DNS_PROVIDER_ID) {
+            upstream
+        } else {
+            app.pwhs.blockads.data.entities.DnsProviders.getById(id ?: "")?.name ?: upstream
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppPreferences.DEFAULT_UPSTREAM_DNS)
 
-    val networkSwitchDelayEnabled: StateFlow<Boolean> = appPrefs.networkSwitchDelayEnabled
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-
-    val networkSwitchDelaySec: StateFlow<Int> = appPrefs.networkSwitchDelaySec
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 30)
 
     val routingMode: StateFlow<String> = appPrefs.routingMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppPreferences.ROUTING_MODE_DIRECT)
+
+    val excludeLan: StateFlow<Boolean> = appPrefs.excludeLan
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     private val _events = MutableSharedFlow<UiEvent>(extraBufferCapacity = 1)
     val events: SharedFlow<UiEvent> = _events.asSharedFlow()
@@ -151,12 +152,12 @@ class SettingsViewModel(
         viewModelScope.launch { appPrefs.setHideFromRecents(enabled) }
     }
 
-    fun setNetworkSwitchDelayEnabled(enabled: Boolean) {
-        viewModelScope.launch { appPrefs.setNetworkSwitchDelayEnabled(enabled) }
-    }
 
-    fun setNetworkSwitchDelaySec(seconds: Int) {
-        viewModelScope.launch { appPrefs.setNetworkSwitchDelaySec(seconds) }
+    fun setExcludeLan(enabled: Boolean) {
+        viewModelScope.launch {
+            appPrefs.setExcludeLan(enabled)
+            requestVpnRestart()
+        }
     }
 
     fun setRoutingModeEnabled(enabled: Boolean) {
@@ -308,12 +309,19 @@ class SettingsViewModel(
                     milestoneNotificationsEnabled = appPrefs.milestoneNotificationsEnabled.first(),
                     activeProfileType = activeProfile?.profileType ?: "",
                     firewallEnabled = appPrefs.firewallEnabled.first(),
-                    filterLists = filterLists.value.map { f ->
+                    filterLists = filterListDao.getAllSync().map { f ->
                         FilterListBackup(name = f.name, url = f.url, isEnabled = f.isEnabled)
                     },
-                    whitelistDomains = whitelistDomains.value.map { it.domain },
+                    whitelistDomains = whitelistDomainDao.getAllDomains()
+                        .map { it.trim().lowercase() }
+                        .filter { it.isNotBlank() }
+                        .distinct(),
+                    blocklistDomains = customDnsRuleDao.getBlockDomains()
+                        .map { it.trim().lowercase() }
+                        .filter { it.isNotBlank() }
+                        .distinct(),
                     whitelistedApps = appPrefs.getWhitelistedAppsSnapshot().toList(),
-                    customRules = customDnsRuleDao.getAll().map { it.rule },
+                    customRules = customDnsRuleDao.getAll().map { it.rule }.distinct(),
                     firewallRules = firewallRuleDao.getEnabledRules().map { r ->
                         FirewallRuleBackup(
                             packageName = r.packageName,
@@ -377,7 +385,7 @@ class SettingsViewModel(
 
                 // Filter lists — add new AND update isEnabled for existing
                 backup.filterLists.forEach { f ->
-                    val existing = filterLists.value.firstOrNull { it.url == f.url }
+                    val existing = filterListDao.getByUrl(f.url)
                     if (existing != null) {
                         // Update isEnabled state if it differs
                         if (existing.isEnabled != f.isEnabled) {
@@ -396,8 +404,28 @@ class SettingsViewModel(
 
                 // Whitelist domains — only add new
                 backup.whitelistDomains.forEach { domain ->
-                    if (whitelistDomainDao.exists(domain) == 0) {
-                        whitelistDomainDao.insert(WhitelistDomain(domain = domain))
+                    val clean = domain.trim().lowercase()
+                    if (clean.isNotBlank() && whitelistDomainDao.exists(clean) == 0) {
+                        whitelistDomainDao.insert(WhitelistDomain(domain = clean))
+                    }
+                }
+
+                // Blocklist domains — support dedicated blocklistDomains list
+                val existingRules = customDnsRuleDao.getAll().map { it.rule }.toSet()
+                backup.blocklistDomains.forEach { domain ->
+                    val clean = domain.trim().lowercase()
+                    if (clean.isNotBlank()) {
+                        val ruleText = "||$clean^"
+                        if (ruleText !in existingRules && customDnsRuleDao.exists(ruleText) == 0) {
+                            customDnsRuleDao.insert(
+                                CustomDnsRule(
+                                    rule = ruleText,
+                                    ruleType = RuleType.BLOCK,
+                                    domain = clean,
+                                    isEnabled = true
+                                )
+                            )
+                        }
                     }
                 }
 
@@ -406,10 +434,11 @@ class SettingsViewModel(
                 appPrefs.setWhitelistedApps(current + backup.whitelistedApps.toSet())
 
                 // Custom rules — parse and add (avoid duplicates)
-                val existingRules = customDnsRuleDao.getAll().map { it.rule }.toSet()
+                val updatedRules = customDnsRuleDao.getAll().map { it.rule }.toSet()
                 backup.customRules.forEach { ruleText ->
-                    if (ruleText !in existingRules) {
-                        val rule = CustomRuleParser.parseRule(ruleText)
+                    val trimmed = ruleText.trim()
+                    if (trimmed.isNotBlank() && trimmed !in updatedRules) {
+                        val rule = CustomRuleParser.parseRule(trimmed)
                         if (rule != null) {
                             customDnsRuleDao.insert(rule)
                         }
@@ -436,14 +465,20 @@ class SettingsViewModel(
                 }
 
                 // Restore active profile LAST — after all filter/rule data is in place.
-                // switchToProfile() overwrites filter isEnabled states based on profile
-                // template, so it must run after the filter list import above.
                 if (backup.activeProfileType.isNotBlank()) {
                     val profile = profileDao.getByType(backup.activeProfileType)
                     if (profile != null) {
+                        val enabledUrls = backup.filterLists.filter { it.isEnabled }.map { it.url }.joinToString(",")
+                        profileDao.update(profile.copy(enabledFilterUrls = enabledUrls))
                         profileManager.switchToProfile(profile.id)
                     }
+                } else {
+                    profileManager.saveActiveProfileFilterUrls()
                 }
+
+                // Refresh in-memory whitelist and custom rules cache
+                filterRepo.loadWhitelist()
+                filterRepo.loadCustomRules()
 
                 _events.toast(R.string.filter_settings_imported)
                 requestVpnRestart()

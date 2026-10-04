@@ -94,12 +94,8 @@ fun SettingsScreen(state: DesktopState, padding: PaddingValues, onOpenFilters: (
                     openChoice(
                         "Routing mode",
                         state.settings.routingMode,
-                        listOf(Choice("direct", "Direct / Local DNS"), Choice("wireguard", "WireGuard"), Choice("root", "Root Proxy")),
+                        listOf(Choice("direct", "Local DNS filtering")),
                     ) { v -> state.updateSettings { current -> current.copy(routingMode = v) } }
-                }
-                DividerInset()
-                SettingsToggleItem(Icons.Default.Speed, "Network switch delay", "Wait before restarting protection after a network change.", state.settings.networkSwitchDelayEnabled) {
-                    scope.launch { state.updateSettings { current -> current.copy(networkSwitchDelayEnabled = it) } }
                 }
                 DividerInset()
                 SettingsToggleItem(Icons.Default.Security, "SafeSearch", "Force supported search engines into SafeSearch.", state.settings.safeSearchEnabled) {
@@ -161,21 +157,10 @@ fun SettingsScreen(state: DesktopState, padding: PaddingValues, onOpenFilters: (
             Spacer(Modifier.height(24.dp))
             SectionHeader("Applications", "Windows equivalents of the Android app-management options.")
             SectionCard {
-                SettingsToggleItem(Icons.Default.Shield, "Firewall", "Enable per-application firewall policy.", state.settings.firewallEnabled) {
-                    scope.launch { state.updateSettings { current -> current.copy(firewallEnabled = it) } }
-                }
-                DividerInset()
                 SettingsToggleItem(Icons.Default.Wifi, "Pause on trusted Wi-Fi", "Pause protection on trusted wireless networks.", state.settings.pauseOnTrusted) {
                     scope.launch { state.updateSettings { current -> current.copy(pauseOnTrusted = it) } }
                 }
                 DividerInset()
-                SettingsToggleItem(Icons.Default.Http, "HTTPS filtering", "Enable BlockAds HTTPS filtering when the Windows tunnel layer is available.", state.settings.httpsFilteringEnabled) {
-                    scope.launch { state.updateSettings { current -> current.copy(httpsFilteringEnabled = it) } }
-                }
-                DividerInset()
-                SettingsToggleItem(Icons.Default.Power, "Filter HTTP/3", "Filter QUIC/HTTP3 traffic when full-tunnel mode is active.", state.settings.filterHttp3) {
-                    scope.launch { state.updateSettings { current -> current.copy(filterHttp3 = it) } }
-                }
             }
 
             Spacer(Modifier.height(24.dp))

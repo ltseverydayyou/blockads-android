@@ -56,6 +56,22 @@ class DomainRulesViewModel(
         }
     }
 
+    fun updateWhitelistDomain(oldDomain: WhitelistDomain, newDomain: String) {
+        viewModelScope.launch {
+            val clean = newDomain.trim().lowercase()
+            if (clean.isNotBlank() && clean != oldDomain.domain.lowercase()) {
+                val exists = whitelistDomainDao.exists(clean)
+                if (exists == 0) {
+                    whitelistDomainDao.update(oldDomain.copy(domain = clean))
+                    _events.toast(R.string.whitelist_domain_added, listOf(clean))
+                    requestVpnRestart()
+                } else {
+                    _events.toast(R.string.filter_domain_already_whitelisted)
+                }
+            }
+        }
+    }
+
     fun removeWhitelistDomain(domain: WhitelistDomain) {
         viewModelScope.launch {
             whitelistDomainDao.delete(domain)
@@ -91,11 +107,75 @@ class DomainRulesViewModel(
         }
     }
 
+    fun updateBlocklistDomain(oldRule: CustomDnsRule, newDomain: String) {
+        viewModelScope.launch {
+            val clean = newDomain.trim().lowercase()
+            if (clean.isNotBlank() && clean != oldRule.domain.lowercase()) {
+                val allRules = customDnsRuleDao.getAll()
+                val exists = allRules.any {
+                    it.ruleType == RuleType.BLOCK && it.domain.equals(clean, ignoreCase = true) && it.id != oldRule.id
+                }
+                if (!exists) {
+                    customDnsRuleDao.update(
+                        oldRule.copy(
+                            domain = clean,
+                            rule = "||$clean^"
+                        )
+                    )
+                    _events.toast(R.string.blocklist_domain_added, listOf(clean))
+                    requestVpnRestart()
+                } else {
+                    _events.toast(R.string.blocklist_domain_already_exists)
+                }
+            }
+        }
+    }
+
     fun removeBlocklistDomain(rule: CustomDnsRule) {
         viewModelScope.launch {
             customDnsRuleDao.delete(rule)
             _events.toast(R.string.blocklist_domain_removed)
             requestVpnRestart()
+        }
+    }
+
+    // ── Bulk Import ──────────────────────────────────────────
+
+    fun importDomains(domains: List<String>, isAllow: Boolean) {
+        if (domains.isEmpty()) return
+        viewModelScope.launch {
+            if (isAllow) {
+                val existing = whitelistDomainDao.getAllDomains().map { it.lowercase() }.toSet()
+                val newDomains = domains.map { it.trim().lowercase() }
+                    .filter { it.isNotBlank() && !existing.contains(it) }
+                    .distinct()
+                if (newDomains.isNotEmpty()) {
+                    whitelistDomainDao.insertAll(newDomains.map { WhitelistDomain(domain = it) })
+                    _events.toast(R.string.wireguard_imported, listOf("${newDomains.size} domains"))
+                    requestVpnRestart()
+                }
+            } else {
+                val existing = customDnsRuleDao.getAll()
+                    .filter { it.ruleType == RuleType.BLOCK }
+                    .map { it.domain.lowercase() }
+                    .toSet()
+                val newDomains = domains.map { it.trim().lowercase() }
+                    .filter { it.isNotBlank() && !existing.contains(it) }
+                    .distinct()
+                if (newDomains.isNotEmpty()) {
+                    customDnsRuleDao.insertAll(
+                        newDomains.map {
+                            CustomDnsRule(
+                                rule = "||$it^",
+                                ruleType = RuleType.BLOCK,
+                                domain = it
+                            )
+                        }
+                    )
+                    _events.toast(R.string.wireguard_imported, listOf("${newDomains.size} domains"))
+                    requestVpnRestart()
+                }
+            }
         }
     }
 

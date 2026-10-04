@@ -54,6 +54,27 @@ private val LightColorScheme = lightColorScheme(
     onError = Color.White
 )
 
+private val OledColorScheme = darkColorScheme(
+    primary = NeonGreen,
+    onPrimary = Color.Black,
+    primaryContainer = NeonGreenDim,
+    onPrimaryContainer = Color.White,
+    secondary = AccentBlue,
+    onSecondary = Color.Black,
+    secondaryContainer = AccentBlueDim,
+    onSecondaryContainer = Color.White,
+    tertiary = DangerRed,
+    background = Color.Black,
+    onBackground = TextPrimary,
+    surface = Color.Black,
+    onSurface = TextPrimary,
+    surfaceVariant = Color(0xFF121212),
+    onSurfaceVariant = TextSecondary,
+    outline = Color(0xFF2E2E2E),
+    error = DangerRed,
+    onError = Color.White
+)
+
 /**
  * Returns a pair of (primary, primaryDim) colors for the given accent color key.
  */
@@ -89,22 +110,34 @@ fun BlockadsTheme(
     accentColor: String = AppPreferences.ACCENT_GREEN,
     content: @Composable () -> Unit
 ) {
+    val isOled = themeMode == AppPreferences.THEME_OLED
     val darkTheme = when (themeMode) {
-        "dark" -> true
-        "light" -> false
+        AppPreferences.THEME_OLED, AppPreferences.THEME_DARK -> true
+        AppPreferences.THEME_LIGHT -> false
         else -> isSystemInDarkTheme()
     }
+    val baseDarkScheme = if (isOled) OledColorScheme else DarkColorScheme
+
     val colorScheme = when {
         // Dynamic Color (Material You) — Android 12+
         accentColor == AppPreferences.ACCENT_DYNAMIC && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            val dynamic = if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            if (isOled) {
+                dynamic.copy(
+                    background = Color.Black,
+                    surface = Color.Black,
+                    surfaceVariant = Color(0xFF121212)
+                )
+            } else {
+                dynamic
+            }
         }
         // Preset or custom accent colors
         accentColor != AppPreferences.ACCENT_GREEN && accentColor != AppPreferences.ACCENT_DYNAMIC -> {
             val (primary, primaryDim) = getAccentColors(accentColor)
             if (darkTheme) {
-                DarkColorScheme.copy(
+                baseDarkScheme.copy(
                     primary = primary,
                     primaryContainer = primaryDim
                 )
@@ -116,7 +149,7 @@ fun BlockadsTheme(
             }
         }
         // Default green
-        darkTheme -> DarkColorScheme
+        darkTheme -> baseDarkScheme
         else -> LightColorScheme
     }
 

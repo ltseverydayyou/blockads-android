@@ -9,6 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import app.pwhs.blockads.data.dao.CustomDnsRuleDao
 import app.pwhs.blockads.data.dao.DnsErrorDao
 import app.pwhs.blockads.data.dao.DnsLogDao
+import app.pwhs.blockads.data.dao.ElementRuleDao
 import app.pwhs.blockads.data.dao.FilterListDao
 import app.pwhs.blockads.data.dao.FirewallRuleDao
 import app.pwhs.blockads.data.dao.ProtectionProfileDao
@@ -16,6 +17,7 @@ import app.pwhs.blockads.data.dao.WhitelistDomainDao
 import app.pwhs.blockads.data.entities.CustomDnsRule
 import app.pwhs.blockads.data.entities.DnsErrorEntry
 import app.pwhs.blockads.data.entities.DnsLogEntry
+import app.pwhs.blockads.data.entities.ElementRule
 import app.pwhs.blockads.data.entities.FilterList
 import app.pwhs.blockads.data.entities.FirewallRule
 import app.pwhs.blockads.data.entities.ProfileSchedule
@@ -23,9 +25,9 @@ import app.pwhs.blockads.data.entities.ProtectionProfile
 import app.pwhs.blockads.data.entities.WhitelistDomain
 
 @Database(
-    entities = [DnsLogEntry::class, FilterList::class, WhitelistDomain::class, DnsErrorEntry::class, CustomDnsRule::class, FirewallRule::class, ProtectionProfile::class, ProfileSchedule::class],
-    version = 13,
-    exportSchema = false
+    entities = [DnsLogEntry::class, FilterList::class, WhitelistDomain::class, DnsErrorEntry::class, CustomDnsRule::class, FirewallRule::class, ProtectionProfile::class, ProfileSchedule::class, ElementRule::class],
+    version = 15,
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
 
@@ -36,6 +38,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun customDnsRuleDao(): CustomDnsRuleDao
     abstract fun protectionProfileDao(): ProtectionProfileDao
     abstract fun firewallRuleDao(): FirewallRuleDao
+    abstract fun elementRuleDao(): ElementRuleDao
 
     companion object {
         @Volatile
@@ -196,6 +199,32 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `element_rules` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `domain` TEXT NOT NULL,
+                        `cssSelector` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL DEFAULT 0
+                    )"""
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_element_rules_domain` ON `element_rules` (`domain`)")
+            }
+        }
+
+        private val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE dns_logs ADD COLUMN countryCode TEXT NOT NULL DEFAULT ''")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_dns_logs_countryCode` ON `dns_logs` (`countryCode`)")
+            }
+        }
+
+        internal val ALL_MIGRATIONS = arrayOf(
+            MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+            MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15,
+        )
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -203,20 +232,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "blockads_database"
                 )
-                    .addMigrations(
-                        MIGRATION_1_2,
-                        MIGRATION_2_3,
-                        MIGRATION_3_4,
-                        MIGRATION_4_5,
-                        MIGRATION_5_6,
-                        MIGRATION_6_7,
-                        MIGRATION_7_8,
-                        MIGRATION_8_9,
-                        MIGRATION_9_10,
-                        MIGRATION_10_11,
-                        MIGRATION_11_12,
-                        MIGRATION_12_13
-                    )
+                    .addMigrations(*ALL_MIGRATIONS)
                     .fallbackToDestructiveMigration(false)
                     .build()
                 INSTANCE = instance

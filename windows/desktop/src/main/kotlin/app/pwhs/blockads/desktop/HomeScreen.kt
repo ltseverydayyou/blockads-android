@@ -105,14 +105,14 @@ fun HomeScreen(
         ) {
             Spacer(Modifier.height(16.dp))
             Text(
-                if (running) "Protected" else if (state.status.pausedTrusted) "Paused" else "Unprotected",
+                if (state.status.starting) "Starting protection" else if (running) "Protected" else if (state.status.pausedTrusted) "Paused" else "Unprotected",
                 style = MaterialTheme.typography.headlineMedium,
                 color = if (running) MaterialTheme.colorScheme.primary else if (state.status.pausedTrusted) SecurityOrange else DangerRed,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                if (running) "Ads, trackers, and malicious domains are being filtered." else "Turn on protection to block ads and trackers system-wide.",
+                if (state.status.error.isNotBlank()) state.status.error else if (running) "Ads, trackers, and malicious domains are being filtered." else "Turn on protection to block ads and trackers system-wide.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary,
                 textAlign = TextAlign.Center,
@@ -147,7 +147,7 @@ fun HomeScreen(
             Spacer(Modifier.height(12.dp))
             PowerButton(
                 isActive = running,
-                isConnecting = state.busy,
+                isConnecting = state.busy || state.status.starting,
                 onClick = { scope.launch { state.toggleProtection() } },
             )
             Spacer(Modifier.height(36.dp))

@@ -30,15 +30,36 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import app.pwhs.blockads.service.NotificationHelper
+import app.pwhs.blockads.R
+import app.pwhs.blockads.data.dao.CustomDnsRuleDao
+import app.pwhs.blockads.data.dao.WhitelistDomainDao
+import app.pwhs.blockads.data.entities.WhitelistDomain
+import app.pwhs.blockads.utils.CustomRuleParser
+import app.pwhs.blockads.ui.event.UiEvent
+import app.pwhs.blockads.ui.event.toast
+import app.pwhs.blockads.ui.home.data.RecentLogFilter
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import timber.log.Timber
 
 class HomeViewModel(
-    appPrefs: AppPreferences,
+    private val appPrefs: AppPreferences,
     dnsLogDao: DnsLogDao,
     private val filterRepo: FilterListRepository,
     profileDao: ProtectionProfileDao,
     filterListDao: FilterListDao,
+    private val whitelistDomainDao: WhitelistDomainDao,
+    private val customDnsRuleDao: CustomDnsRuleDao,
 ) : ViewModel() {
+
+    val whitelistedDomains: StateFlow<Set<String>> = whitelistDomainDao.getAll()
+        .map { list -> list.map { it.domain.lowercase() }.toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    private val _events = MutableSharedFlow<UiEvent>()
+    val events: SharedFlow<UiEvent> = _events.asSharedFlow()
 
     val routingMode: StateFlow<String> = appPrefs.routingMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "local")
@@ -56,8 +77,13 @@ class HomeViewModel(
         AdBlockVpnService.state,
         RootProxyService.state
     ) { state1, state2 ->
-        state1 == VpnState.RUNNING || state2 == VpnState.RUNNING
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AdBlockVpnService.isRunning || RootProxyService.isRunning)
+        state1 == VpnState.RUNNING || state1 == VpnState.STOPPING ||
+        state2 == VpnState.RUNNING || state2 == VpnState.STOPPING
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        AdBlockVpnService.isRunning || AdBlockVpnService.isStopping || RootProxyService.isRunning
+    )
 
     val vpnConnecting: StateFlow<Boolean> = combine(
         AdBlockVpnService.state,
@@ -80,13 +106,22 @@ class HomeViewModel(
     val totalCount: StateFlow<Int> = dnsLogDao.getTotalCount()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    val securityThreatsBlocked: StateFlow<Int> = dnsLogDao.getBlockedCountByReason(
-        FilterListRepository.BLOCK_REASON_SECURITY
-    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    private val _recentFilter = MutableStateFlow(RecentLogFilter.BLOCKED)
+    val recentFilter: StateFlow<RecentLogFilter> = _recentFilter.asStateFlow()
 
-    val recentBlocked: StateFlow<List<DnsLogEntry>> =
-        dnsLogDao.getRecentBlocked()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val recentLogs: StateFlow<List<DnsLogEntry>> = combine(
+        _recentFilter,
+        dnsLogDao.getRecentBlocked(5),
+        dnsLogDao.getRecentLogs(5)
+    ) { filter, blocked, all ->
+        if (filter == RecentLogFilter.BLOCKED) blocked else all
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val recentBlocked: StateFlow<List<DnsLogEntry>> = recentLogs
+
+    fun setRecentFilter(filter: RecentLogFilter) {
+        _recentFilter.value = filter
+    }
 
     val hourlyStats: StateFlow<List<HourlyStat>> = dnsLogDao.getHourlyStats()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -99,6 +134,20 @@ class HomeViewModel(
 
     val activeProfile: StateFlow<ProtectionProfile?> = profileDao.getActiveFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val milestoneReached: StateFlow<Long?> = combine(
+        blockedCount,
+        appPrefs.lastSeenMilestoneDialog,
+        appPrefs.milestoneNotificationsEnabled
+    ) { blocked, lastSeen, enabled ->
+        NotificationHelper.unseenMilestone(blocked.toLong(), lastSeen, enabled)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    fun dismissMilestoneDialog(milestone: Long) {
+        viewModelScope.launch {
+            appPrefs.setLastSeenMilestoneDialog(milestone)
+        }
+    }
 
     val securityFilterIds: StateFlow<Set<String>> = filterListDao.getAll()
         .map { list -> list.filter { it.category == FilterList.CATEGORY_SECURITY }.map { it.id.toString() }.toSet() }
@@ -190,4 +239,69 @@ class HomeViewModel(
         }
     }
 
+    fun addToWhitelist(domain: String) {
+        viewModelScope.launch {
+            val cleanDomain = domain.trim().lowercase()
+            val exists = whitelistDomainDao.exists(cleanDomain)
+            if (exists == 0) {
+                whitelistDomainDao.insert(WhitelistDomain(domain = cleanDomain))
+                filterRepo.loadWhitelist()
+                _events.toast(R.string.log_whitelisted, listOf(": $cleanDomain"))
+            } else {
+                _events.toast(R.string.log_already_whitelisted)
+            }
+        }
+    }
+
+    fun removeFromWhitelist(domain: String) {
+        viewModelScope.launch {
+            val cleanDomain = domain.trim().lowercase()
+            whitelistDomainDao.deleteByDomain(cleanDomain)
+            filterRepo.loadWhitelist()
+            _events.toast(R.string.whitelist_domain_removed)
+        }
+    }
+
+    fun addWildcardWhitelist(domain: String) {
+        viewModelScope.launch {
+            val cleanDomain = domain.trim().lowercase()
+            val domainRuleText = "@@||$cleanDomain^"
+            val wildcardRuleText = "@@||*.$cleanDomain^"
+
+            var addedAny = false
+            if (customDnsRuleDao.exists(domainRuleText) == 0) {
+                val domainRule = CustomRuleParser.parseRule(domainRuleText)
+                if (domainRule != null) {
+                    customDnsRuleDao.insert(domainRule)
+                    addedAny = true
+                }
+            }
+            if (customDnsRuleDao.exists(wildcardRuleText) == 0) {
+                val wildcardRule = CustomRuleParser.parseRule(wildcardRuleText)
+                if (wildcardRule != null) {
+                    customDnsRuleDao.insert(wildcardRule)
+                    addedAny = true
+                }
+            }
+            if (addedAny) {
+                filterRepo.loadCustomRules()
+            }
+            _events.toast(R.string.log_wildcard_whitelisted, listOf(cleanDomain))
+        }
+    }
+
+    fun addToCustomBlockRules(domain: String) {
+        viewModelScope.launch {
+            val cleanDomain = domain.trim().lowercase()
+            val ruleText = CustomRuleParser.formatBlockRule(cleanDomain)
+            val rule = CustomRuleParser.parseRule(ruleText)
+            if (rule != null) {
+                if (customDnsRuleDao.exists(rule.rule) == 0) {
+                    customDnsRuleDao.insert(rule)
+                    filterRepo.loadCustomRules()
+                }
+                _events.toast(R.string.rule_added)
+            }
+        }
+    }
 }

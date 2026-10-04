@@ -49,11 +49,15 @@ class BlockAdsApplication : Application() {
             appPreferences.migrateLegacyWgConfigIfNeeded()
 
             FilterUpdateScheduler.scheduleFilterUpdate(this@BlockAdsApplication, appPreferences)
+            app.pwhs.blockads.ui.browser.rules.BrowserRuleUpdateWorker.schedule(this@BlockAdsApplication)
 
             // Schedule daily summary only if enabled
             if (appPreferences.dailySummaryEnabled.first()) {
                 DailySummaryScheduler.scheduleDailySummary(this@BlockAdsApplication)
             }
+
+            // Warm up GeoIP database on IO thread
+            app.pwhs.blockads.data.geoip.GeoIpLookup.init(this@BlockAdsApplication)
         }
 
         // Trusted Wi-Fi networks (#197): auto-pause/resume on SSID change.

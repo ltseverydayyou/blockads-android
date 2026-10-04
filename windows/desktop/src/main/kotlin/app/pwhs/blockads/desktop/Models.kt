@@ -1,4 +1,4 @@
-﻿package app.pwhs.blockads.desktop
+package app.pwhs.blockads.desktop
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -11,6 +11,8 @@ data class Stats(
 
 @Serializable
 data class Status(
+ val starting: Boolean = false,
+ val error: String = "",
     val running: Boolean = false,
     val pausedTrusted: Boolean = false,
     val stats: Stats = Stats(),

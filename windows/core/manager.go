@@ -1,27 +1,30 @@
 package blockadswin
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tunnel "github.com/nqmgaming/blockads-tunnel"
 )
 
 const (
-	filterMetadataURL = "https://raw.githubusercontent.com/pass-with-high-score/blockads-default-filter/refs/heads/main/output/filter_lists.json"
+	filterMetadataURL = "https://complier.pwhs.app/api/filters/default"
 	compilerURL       = "https://complier.pwhs.app/api/build"
 	controlAddress    = "127.0.0.1:8754"
 )
 
 type Manager struct {
+	healthQueries                                                                      atomic.Int64
+	lifecycleMu                                                                        sync.Mutex
+	filterMu                                                                           sync.Mutex
+	startError                                                                         string
 	mu                                                                                 sync.RWMutex
 	engine                                                                             *tunnel.Engine
 	settings                                                                           Settings
@@ -90,7 +93,10 @@ func newManager() (*Manager, error) {
 	if base == "" {
 		base = "."
 	}
-	dataDir := filepath.Join(base, "BlockAds")
+	dataDir, err := prepareDataDirectory(base)
+	if err != nil {
+		return nil, err
+	}
 	filtersDir := filepath.Join(dataDir, "remote_filters")
 	if err := os.MkdirAll(filtersDir, 0755); err != nil {
 		return nil, err
@@ -128,10 +134,11 @@ func newManager() (*Manager, error) {
 			m.ids.log.Store(e.ID)
 		}
 	}
-	if len(m.filters) == 0 || m.filtersNeedSync() {
-		if err := m.syncFilters(); err != nil {
-			log.Printf("initial filter sync: %v", err)
-		}
+	newInstall := len(m.filters) == 0
+	if err := m.applyCatalog(mergeCatalog(nil)); err != nil {
+		return nil, err
+	}
+	if newInstall {
 		_ = m.activateProfile(m.settings.ActiveProfile, false)
 	}
 	m.startAutoUpdater()
@@ -234,7 +241,8 @@ func (m *Manager) configureEngineWithSettings(e *tunnel.Engine, s Settings) erro
 	}
 	e.SetDomainChecker(m.checker)
 	e.SetLogCallback(m.logCallback)
-	e.SetConnLogEnabled(s.RecordDNSLogs)
+	// The callback honors RecordDNSLogs and separately counts internal health probes.
+	e.SetConnLogEnabled(true)
 	e.SetDNS(protocol, primary, fallback, dohURL)
 	e.SetBlockResponseType(strings.ToUpper(s.DNSResponseType))
 	e.SetSafeSearch(s.SafeSearchEnabled)
@@ -251,13 +259,25 @@ func (m *Manager) configureEngine(e *tunnel.Engine) error {
 	return m.configureEngineWithSettings(e, s)
 }
 
-func (m *Manager) start(useSystemDNS bool) error {
+func (m *Manager) start(useSystemDNS bool) (startErr error) {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		if startErr != nil {
+			m.startError = startErr.Error()
+		} else {
+			m.startError = ""
+		}
+		m.mu.Unlock()
+	}()
 	m.mu.Lock()
 	if m.running {
 		m.mu.Unlock()
 		return nil
 	}
 	e := tunnel.NewEngine()
+	m.healthQueries.Store(0)
 	m.engine = e
 	m.mu.Unlock()
 	if useSystemDNS {
@@ -301,6 +321,20 @@ func (m *Manager) start(useSystemDNS bool) error {
 			return err
 		}
 	}
+	port := 53
+	if !useSystemDNS {
+		port = m.settings.ListenPort
+	}
+	if err := verifyDNS(port); err != nil {
+		if cleanup != nil {
+			_ = cleanup()
+		}
+		e.Stop()
+		m.mu.Lock()
+		m.engine = nil
+		m.mu.Unlock()
+		return err
+	}
 	m.mu.Lock()
 	m.systemTunnelCleanup = cleanup
 	m.running = true
@@ -320,6 +354,8 @@ func (m *Manager) shutdown(restore bool) error {
 }
 
 func (m *Manager) stopInternal(restore bool, disableProtection bool) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	m.mu.Lock()
 	e := m.engine
 	cleanup := m.systemTunnelCleanup
@@ -347,6 +383,8 @@ func (m *Manager) stopInternal(restore bool, disableProtection bool) error {
 }
 
 func (m *Manager) applySettings(s Settings) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	if s.NetworkSwitchDelaySec <= 0 {
 		s.NetworkSwitchDelaySec = 30
 	}
@@ -390,91 +428,10 @@ func (m *Manager) stats() Stats {
 	}
 	var s Stats
 	_ = json.Unmarshal([]byte(e.GetStats()), &s)
+	health := m.healthQueries.Load()
+	s.TotalQueries = max(0, s.TotalQueries-health)
+	s.BlockedQueries = max(0, s.BlockedQueries-health)
 	return s
-}
-
-func (m *Manager) startAutoUpdater() {
-	m.mu.Lock()
-	if m.autoUpdateStop != nil {
-		close(m.autoUpdateStop)
-	}
-	stop := make(chan struct{})
-	m.autoUpdateStop = stop
-	s := m.settings
-	m.mu.Unlock()
-	if !s.AutoUpdateEnabled || s.AutoUpdateFrequency == "manual" {
-		return
-	}
-	dur := 24 * time.Hour
-	switch s.AutoUpdateFrequency {
-	case "6h":
-		dur = 6 * time.Hour
-	case "12h":
-		dur = 12 * time.Hour
-	case "48h":
-		dur = 48 * time.Hour
-	}
-	go func() {
-		t := time.NewTicker(dur)
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				_ = m.syncFilters()
-				_, _ = m.loadEnabledFilters(true)
-			case <-stop:
-				return
-			}
-		}
-	}()
-}
-
-func (m *Manager) trustedWatcher(ctx context.Context) {
-	t := time.NewTicker(5 * time.Second)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			m.mu.RLock()
-			enabled := m.settings.PauseOnTrusted
-			trusted := append([]string(nil), m.settings.TrustedSSIDs...)
-			running := m.running
-			paused := m.pausedTrusted
-			delayOn := m.settings.NetworkSwitchDelayEnabled
-			delay := m.settings.NetworkSwitchDelaySec
-			m.mu.RUnlock()
-			if !enabled {
-				continue
-			}
-			ssid := currentSSID()
-			hit := false
-			for _, s := range trusted {
-				if s == ssid && ssid != "" {
-					hit = true
-					break
-				}
-			}
-			if hit && running && !paused {
-				if m.stop(true) == nil {
-					m.mu.Lock()
-					m.pausedTrusted = true
-					m.mu.Unlock()
-				}
-			}
-			if !hit && paused {
-				if delayOn {
-					time.Sleep(time.Duration(delay) * time.Second)
-				}
-				if m.start(true) == nil {
-					m.mu.Lock()
-					m.pausedTrusted = false
-					m.mu.Unlock()
-				}
-			}
-		}
-	}
 }
 
 func (m *Manager) debugSummary() string {

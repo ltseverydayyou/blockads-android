@@ -49,15 +49,16 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.pwhs.blockads.R
 import app.pwhs.blockads.ui.httpsfiltering.component.BrowserRow
+import app.pwhs.blockads.ui.httpsfiltering.component.CertificateStatusCard
 import app.pwhs.blockads.ui.httpsfiltering.component.ExplanationCard
 import app.pwhs.blockads.ui.httpsfiltering.component.MasterToggleCard
-import app.pwhs.blockads.ui.httpsfiltering.component.SetupGuideCard
 import org.koin.androidx.compose.koinViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HttpsFilteringScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToWizard: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: HttpsFilteringViewModel = koinViewModel()
 ) {
@@ -182,27 +183,13 @@ fun HttpsFilteringScreen(
                     ExplanationCard()
                 }
 
-                // ── Setup Guide (only when enabled) ──────────────────
+                // ── Certificate Status Card ──────────────────────────
                 item {
-                    AnimatedVisibility(
-                        visible = isEnabled,
-                        enter = fadeIn(),
-                        exit = fadeOut()
-                    ) {
-                        SetupGuideCard(
-                            certExported = certExported,
-                            certStatus = certStatus,
-                            onExport = { viewModel.exportCaCert() },
-                            onOpenSettings = {
-                                try {
-                                    val intent = viewModel.createSecuritySettingsIntent()
-                                    settingsLauncher.launch(intent)
-                                } catch (_: Exception) {
-                                }
-                            },
-                            onVerifyCert = { viewModel.verifyCert() }
-                        )
-                    }
+                    CertificateStatusCard(
+                        certStatus = certStatus,
+                        onOpenWizard = onNavigateToWizard,
+                        onVerifyCert = { viewModel.verifyCert() }
+                    )
                 }
 
                 // ── Browser Selection Header ──────────────────────────

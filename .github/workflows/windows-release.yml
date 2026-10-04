@@ -38,17 +38,23 @@ jobs:
       - name: Publish Windows release
         uses: softprops/action-gh-release@v2
         with:
-          name: BlockAds for Windows v1.3
+          name: BlockAds for Windows v1.4.0
           body: |
-            Windows v1.3 makes BlockAds behave properly as a Windows app.
+            Windows v1.4.0 syncs the shared engine and filter catalog with upstream Android v6.8.0.
 
-            - Adds a system tray icon with quick on/off controls.
-            - Adds a taskbar right-click toggle.
-            - Remembers whether protection was enabled after a restart.
-            - Fixes the UAC startup race that could reset settings.
-            - Prompts when a newer Windows release is available.
+            - Verifies local IPv4/IPv6 UDP/TCP DNS filtering before reporting protection.
+            - Reconnects after DNS service failure when auto reconnect is enabled.
+            - Refreshes active filter lists without overwriting mapped files.
+            - Stores saved data outside the installer directory for future upgrades.
+            - Preserves normal network routes for games and other applications.
+
+            When upgrading from v1.3.1 or older, back up %LOCALAPPDATA%/BlockAds first,
+            or launch the new portable app once before running the installer to migrate saved data.
+
+            DNS filtering blocks ad and tracker domains. Same-host ads and custom browser DNS may bypass it.
           files: |
-            windows/dist/BlockAds-Windows-Setup-v1.3.exe
-            windows/dist/BlockAds-Windows-Portable-v1.3.zip
+            windows/dist/BlockAds-Windows-Setup-v1.4.0.exe
+            windows/dist/BlockAds-Windows-Portable-v1.4.0.zip
+          fail_on_unmatched_files: true
           draft: false
           prerelease: false

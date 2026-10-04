@@ -26,7 +26,9 @@ func (m *Manager) Settings() Settings {
 
 func (m *Manager) Status() Status {
 	m.mu.RLock()
-	running := m.running
+	running := m.running && m.engine != nil && m.engine.IsRunning()
+	starting := m.engine != nil && !m.running
+	startError := m.startError
 	paused := m.pausedTrusted
 	filterCount := len(m.filters)
 	ruleCount := len(m.rules)
@@ -36,7 +38,7 @@ func (m *Manager) Status() Status {
 	if checkSSID {
 		ssid = currentSSID()
 	}
-	return Status{Running: running, PausedTrusted: paused, Stats: m.stats(), FilterCount: filterCount, RuleCount: ruleCount, CurrentSSID: ssid, Admin: isAdmin(), Version: "1.3.1"}
+	return Status{Starting: starting, Error: startError, Running: running, PausedTrusted: paused, Stats: m.stats(), FilterCount: filterCount, RuleCount: ruleCount, CurrentSSID: ssid, Admin: isAdmin(), Version: "1.4.0"}
 }
 
 func (m *Manager) Filters() []FilterList {
@@ -68,7 +70,8 @@ func (m *Manager) SetFilterEnabled(id string, enabled bool) error {
 	}
 	_ = m.saveSettings()
 	if running {
-		_, _ = m.loadEnabledFilters(false)
+		_, err := m.loadEnabledFilters(false)
+		return err
 	}
 	return nil
 }
@@ -111,7 +114,8 @@ func (m *Manager) RemoveCustomFilter(id string) error {
 		return err
 	}
 	if running {
-		_, _ = m.loadEnabledFilters(false)
+		_, err := m.loadEnabledFilters(false)
+		return err
 	}
 	return nil
 }

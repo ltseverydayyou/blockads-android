@@ -20,7 +20,7 @@ class BackendException(message: String) : RuntimeException(message)
 
 object BackendClient {
     private const val base = "http://127.0.0.1:8754"
-    private const val expectedCoreVersion = "1.3.1"
+    private const val expectedCoreVersion = "1.4.0"
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build()
     private var startedProcess: Process? = null
@@ -56,8 +56,12 @@ object BackendClient {
             .start()
         startedProcess = launcher
 
+        val launchStartedAt = System.nanoTime()
         var launcherExitAt = 0L
         while (true) {
+            if (System.nanoTime() - launchStartedAt > 120_000_000_000L) {
+                throw BackendException("BlockAdsCore startup timed out. See ${log.absolutePath}")
+            }
             val ready = statusSync()
             if (ready?.admin == true && ready.version == expectedCoreVersion) return@withContext
             if (!launcher.isAlive) {
@@ -71,7 +75,9 @@ object BackendClient {
     }
 
     fun persistedSettings(): Settings? = runCatching {
-        val file = File(System.getenv("LOCALAPPDATA") ?: ".", "BlockAds/settings.json")
+        val base = System.getenv("LOCALAPPDATA") ?: "."
+        val file = File(base, "BlockAdsData/settings.json").takeIf { it.isFile }
+            ?: File(base, "BlockAds/settings.json")
         if (!file.isFile) return@runCatching null
         json.decodeFromString<Settings>(file.readText())
     }.getOrNull()

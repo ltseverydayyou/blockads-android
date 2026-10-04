@@ -13,6 +13,8 @@ New-Item -ItemType Directory -Force $backendResource | Out-Null
 New-Item -ItemType Directory -Force $dist | Out-Null
 Get-ChildItem $dist -File -ErrorAction SilentlyContinue | Remove-Item -Force
 
+Copy-Item (Join-Path $repo "app\src\main\assets\preset\default_filters.json") (Join-Path $core "assets\default_filters.json") -Force
+
 Push-Location $core
 & $go test ./...
 if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
@@ -25,12 +27,12 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $installer = Get-ChildItem (Join-Path $desktop "build\compose\binaries\main\exe") -Filter "*.exe" | Select-Object -First 1
 if (-not $installer) { throw "Compose installer was not produced" }
-$setupOut = Join-Path $dist "BlockAds-Windows-Setup-v1.3.1.exe"
+$setupOut = Join-Path $dist "BlockAds-Windows-Setup-v1.4.0.exe"
 Copy-Item $installer.FullName $setupOut -Force
 
 $appDir = Join-Path $desktop "build\compose\binaries\main\app\BlockAds"
 if (-not (Test-Path $appDir)) { throw "Compose portable app image was not produced" }
-$portableOut = Join-Path $dist "BlockAds-Windows-Portable-v1.3.1.zip"
+$portableOut = Join-Path $dist "BlockAds-Windows-Portable-v1.4.0.zip"
 Compress-Archive -Path (Join-Path $appDir "*") -DestinationPath $portableOut -CompressionLevel Optimal -Force
 
 Write-Host "Built:"

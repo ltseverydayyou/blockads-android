@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.pwhs.blockads.ui.theme.TextSecondary
+import androidx.compose.material.icons.filled.Edit
 import app.pwhs.blockads.utils.formatTimestamp
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -42,6 +43,7 @@ fun DomainItem(
     iconTint: Color,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onDelete: () -> Unit,
+    onEdit: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -51,7 +53,7 @@ fun DomainItem(
         modifier = modifier
             .fillMaxWidth()
             .combinedClickable(
-                onClick = {},
+                onClick = onEdit,
                 onLongClick = {
                     val clipboard =
                         context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -86,6 +88,17 @@ fun DomainItem(
                     text = formatTimestamp(addedTimestamp),
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
+                )
+            }
+            IconButton(
+                onClick = onEdit,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = "Edit",
+                    tint = TextSecondary.copy(alpha = 0.6f),
+                    modifier = Modifier.size(18.dp)
                 )
             }
             IconButton(

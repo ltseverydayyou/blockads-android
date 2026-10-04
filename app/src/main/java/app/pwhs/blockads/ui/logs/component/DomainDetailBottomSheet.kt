@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -27,7 +28,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,6 +82,8 @@ fun DomainDetailBottomSheet(
             }
         }
     }
+
+    val blockedFirewallPackages by viewModel.blockedFirewallPackages.collectAsStateWithLifecycle()
 
     ModalBottomSheet(
         modifier = modifier,
@@ -306,6 +311,52 @@ fun DomainDetailBottomSheet(
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Firewall app toggle action
+            val isValidApp = entry.packageName.isNotBlank() &&
+                    entry.packageName != "android" &&
+                    !entry.packageName.startsWith("local.")
+            if (isValidApp) {
+                val isAppInFirewall = blockedFirewallPackages.contains(entry.packageName)
+                Card(
+                    onClick = { viewModel.toggleAppFirewall(entry.packageName) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isAppInFirewall) Icons.Default.Shield else Icons.Default.Block,
+                            contentDescription = null,
+                            tint = if (isAppInFirewall) WhitelistAmber else DangerRed,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "${stringResource(R.string.firewall_title)}: ${stringResource(if (isAppInFirewall) R.string.log_action_unblock else R.string.log_action_block)}",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            if (entry.appName.isNotBlank()) {
+                                Text(
+                                    text = entry.appName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))

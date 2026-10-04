@@ -19,45 +19,25 @@ import (
 )
 
 func (m *Manager) syncFilters() error {
-	resp, err := m.client.Get(filterMetadataURL)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("filter metadata HTTP %d", resp.StatusCode)
-	}
 	var remote []remoteFilter
-	if err = json.NewDecoder(resp.Body).Decode(&remote); err != nil {
-		return err
-	}
-	m.mu.Lock()
-	old := map[string]FilterList{}
-	custom := []FilterList{}
-	for _, f := range m.filters {
-		if f.BuiltIn {
-			old[f.ID] = f
+	resp, err := m.client.Get(filterMetadataURL)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			err = fmt.Errorf("filter metadata HTTP %d", resp.StatusCode)
 		} else {
-			custom = append(custom, f)
+			err = json.NewDecoder(resp.Body).Decode(&remote)
 		}
 	}
-	next := make([]FilterList, 0, len(remote)+len(custom))
-	now := time.Now().UnixMilli()
-	for _, rf := range remote {
-		enabled := rf.IsEnabled
-		if o, ok := old[rf.ID]; ok {
-			enabled = o.Enabled
-		}
-		cat := "AD"
-		if strings.EqualFold(rf.Category, "security") {
-			cat = "SECURITY"
-		}
-		next = append(next, FilterList{ID: rf.ID, Name: rf.Name, URL: rf.OriginalURL, Description: rf.Description, Enabled: enabled, BuiltIn: true, Category: cat, RuleCount: rf.RuleCount, BloomURL: rf.BloomURL, TrieURL: rf.TrieURL, CSSURL: rf.CSSURL, ScriptletsURL: rf.ScriptletsURL, OriginalURL: rf.OriginalURL, LastUpdated: now})
+	if err != nil {
+		log.Printf("remote filter catalog unavailable, using bundled catalog: %v", err)
+		remote = nil
 	}
-	next = append(next, custom...)
-	m.filters = next
-	m.mu.Unlock()
-	return m.saveFilters()
+	remote = mergeCatalog(remote)
+	if len(remote) == 0 {
+		return errors.New("filter catalog is empty")
+	}
+	return m.applyCatalog(remote)
 }
 
 func (m *Manager) download(url, path string, force bool) error {
@@ -107,8 +87,8 @@ func (m *Manager) ensureSafeLocalDNSFilter(f *FilterList, force bool) error {
 		return errors.New("filter has no original source URL")
 	}
 
-	triePath := filepath.Join(m.filtersDir, f.ID+".trie")
-	bloomPath := filepath.Join(m.filtersDir, f.ID+".bloom")
+	triePath := m.filterPath(*f, ".trie")
+	bloomPath := m.filterPath(*f, ".bloom")
 	markerPath := filepath.Join(m.filtersDir, f.ID+".dns-compiler")
 
 	if !force {
@@ -117,8 +97,8 @@ func (m *Manager) ensureSafeLocalDNSFilter(f *FilterList, force bool) error {
 		bloomInfo, bloomErr := os.Stat(bloomPath)
 		if markerErr == nil && strings.TrimSpace(string(marker)) == dnsFilterCompilerVersion &&
 			trieErr == nil && trieInfo.Size() > 0 && bloomErr == nil && bloomInfo.Size() > 0 {
-			f.TrieURL = "local://" + f.ID + ".trie"
-			f.BloomURL = "local://" + f.ID + ".bloom"
+			f.TrieURL = "local://" + filepath.Base(triePath)
+			f.BloomURL = "local://" + filepath.Base(bloomPath)
 			return nil
 		}
 	}
@@ -128,6 +108,11 @@ func (m *Manager) ensureSafeLocalDNSFilter(f *FilterList, force bool) error {
 	if err := m.download(sourceURL, tmp, true); err != nil {
 		return err
 	}
+	revision := strconv.FormatInt(time.Now().UnixNano(), 36)
+	if force || filepath.Base(triePath) != f.ID+".trie" {
+		triePath = filepath.Join(m.filtersDir, f.ID+".rev-"+revision+".trie")
+		bloomPath = filepath.Join(m.filtersDir, f.ID+".rev-"+revision+".bloom")
+	}
 	count, err := tunnel.CompileFilterList(tmp, triePath, bloomPath)
 	if err != nil {
 		return err
@@ -135,13 +120,15 @@ func (m *Manager) ensureSafeLocalDNSFilter(f *FilterList, force bool) error {
 	if err := os.WriteFile(markerPath, []byte(dnsFilterCompilerVersion+"\n"), 0644); err != nil {
 		return err
 	}
-	f.TrieURL = "local://" + f.ID + ".trie"
-	f.BloomURL = "local://" + f.ID + ".bloom"
+	f.TrieURL = "local://" + filepath.Base(triePath)
+	f.BloomURL = "local://" + filepath.Base(bloomPath)
 	f.RuleCount = count
 	return nil
 }
 
 func (m *Manager) loadEnabledFilters(force bool) (int, error) {
+	m.filterMu.Lock()
+	defer m.filterMu.Unlock()
 	m.mu.RLock()
 	filters := append([]FilterList(nil), m.filters...)
 	eng := m.engine
@@ -157,9 +144,9 @@ func (m *Manager) loadEnabledFilters(force bool) (int, error) {
 			continue
 		}
 		enabledFilters++
-		if f.BuiltIn {
-			if err := m.ensureSafeLocalDNSFilter(f, force); err != nil {
-				log.Printf("filter %s safe local compile: %v", f.Name, err)
+		if err := m.ensureSafeLocalDNSFilter(f, force); err != nil {
+			log.Printf("filter %s safe local compile: %v", f.Name, err)
+			if cachedErr := m.ensureSafeLocalDNSFilter(f, false); cachedErr != nil {
 				continue
 			}
 		}
@@ -167,8 +154,8 @@ func (m *Manager) loadEnabledFilters(force bool) (int, error) {
 			log.Printf("filter %s has no compiled trie/bloom metadata", f.Name)
 			continue
 		}
-		triePath := filepath.Join(m.filtersDir, f.ID+".trie")
-		bloomPath := filepath.Join(m.filtersDir, f.ID+".bloom")
+		triePath := m.filterPath(*f, ".trie")
+		bloomPath := m.filterPath(*f, ".bloom")
 		if err := m.download(f.TrieURL, triePath, force); err != nil {
 			log.Printf("filter %s trie: %v", f.Name, err)
 			continue
@@ -204,6 +191,9 @@ func (m *Manager) loadEnabledFilters(force bool) (int, error) {
 		loadedFilters++
 		total += f.RuleCount
 	}
+	if enabledFilters > 0 && loadedFilters == 0 {
+		return total, fmt.Errorf("no enabled filter lists could be loaded; existing protection was preserved")
+	}
 	m.mu.Lock()
 	m.filters = filters
 	m.mu.Unlock()
@@ -212,9 +202,7 @@ func (m *Manager) loadEnabledFilters(force bool) (int, error) {
 		eng.SetTries(strings.Join(adTries, ","), strings.Join(secTries, ","), strings.Join(adBlooms, ","), strings.Join(secBlooms, ","))
 		eng.SetCosmeticCSS(strings.Join(cssParts, "\n"))
 		eng.SetScriptletRules(strings.Join(scriptParts, "\n"))
-	}
-	if enabledFilters > 0 && loadedFilters == 0 {
-		return total, fmt.Errorf("no enabled filter lists could be loaded")
+		m.cleanupRetiredFilters(filters)
 	}
 	return total, nil
 }
@@ -375,8 +363,8 @@ func (m *Manager) compileLocally(f *FilterList) error {
 	if err != nil {
 		return err
 	}
-	f.TrieURL = "local://" + f.ID + ".trie"
-	f.BloomURL = "local://" + f.ID + ".bloom"
+	f.TrieURL = "local://" + filepath.Base(trie)
+	f.BloomURL = "local://" + filepath.Base(bloom)
 	f.RuleCount = count
 	return nil
 }

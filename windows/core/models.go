@@ -101,6 +101,8 @@ type Stats struct {
 	BlockedQueries int64 `json:"blocked"`
 }
 type Status struct {
+	Starting      bool   `json:"starting"`
+	Error         string `json:"error"`
 	Running       bool   `json:"running"`
 	PausedTrusted bool   `json:"pausedTrusted"`
 	Stats         Stats  `json:"stats"`

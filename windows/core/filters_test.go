@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -34,14 +35,14 @@ func TestEnsureSafeLocalDNSFilterMigratesScopedRules(t *testing.T) {
 	if err := m.ensureSafeLocalDNSFilter(&filter, true); err != nil {
 		t.Fatal(err)
 	}
-	triePath := filepath.Join(filtersDir, "easylist.trie")
+	triePath := m.filterPath(filter, ".trie")
 	if tunnel.CheckDomainInTrieFile(triePath, "aryssucksass.ltseverydayyou.workers.dev") {
 		t.Fatal("scoped workers.dev rule became a global DNS block")
 	}
 	if !tunnel.CheckDomainInTrieFile(triePath, "adinplay-venatus.workers.dev") {
 		t.Fatal("context-free workers.dev block should remain active")
 	}
-	if filter.TrieURL != "local://easylist.trie" || filter.BloomURL != "local://easylist.bloom" {
+	if !strings.HasPrefix(filter.TrieURL, "local://easylist.rev-") || !strings.HasPrefix(filter.BloomURL, "local://easylist.rev-") {
 		t.Fatalf("unexpected local filter URLs: %q %q", filter.TrieURL, filter.BloomURL)
 	}
 	marker, err := os.ReadFile(filepath.Join(filtersDir, "easylist.dns-compiler"))

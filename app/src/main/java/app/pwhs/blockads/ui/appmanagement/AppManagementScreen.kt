@@ -19,8 +19,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
+import app.pwhs.blockads.ui.component.AppListSkeleton
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -280,24 +280,7 @@ fun AppManagementScreen(
             }
 
             if (isLoading) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(40.dp),
-                            strokeWidth = 3.dp
-                        )
-                        Spacer(modifier = Modifier.size(12.dp))
-                        Text(
-                            text = stringResource(R.string.app_management_loading),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary
-                        )
-                    }
-                }
+                AppListSkeleton()
             } else {
                 HorizontalPager(
                     state = pagerState,

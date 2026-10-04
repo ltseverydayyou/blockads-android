@@ -28,7 +28,6 @@ import kotlinx.coroutines.delay
 enum class RootTab(val label: String, val icon: ImageVector) {
     Home("Home", BlockAdsIcons.Home),
     Filters("Filters", BlockAdsIcons.Shield),
-    Firewall("Firewall", BlockAdsIcons.Fire),
     DomainRules("Rules", BlockAdsIcons.Crown),
     Settings("Settings", BlockAdsIcons.Settings),
 }
@@ -44,12 +43,14 @@ fun BlockAdsDesktopApp(state: DesktopState) {
     LaunchedEffect(Unit) { state.initialize() }
     LaunchedEffect(Unit) { state.checkForUpdate() }
     LaunchedEffect(Unit) {
+        var refreshTick = 0
         while (true) {
             delay(1500)
             if (!state.loading && !state.busy) runCatching {
                 state.refreshStatus()
+                if (++refreshTick % 20 == 0 || currentTab == RootTab.Filters) state.refreshFilters()
                 if (currentTab == RootTab.Home || detail == DetailPage.Logs || detail == DetailPage.Statistics) state.refreshLogs()
-            }
+            }.onFailure { state.status = Status(); state.message = "BlockAds backend disconnected. Reopen the app to reconnect." }
         }
     }
     LaunchedEffect(state.message) {
@@ -117,7 +118,6 @@ fun BlockAdsDesktopApp(state: DesktopState) {
                     onProfiles = { detail = DetailPage.Profiles },
                 )
                 RootTab.Filters -> FiltersScreen(state, padding)
-                RootTab.Firewall -> FirewallScreen(state, padding)
                 RootTab.DomainRules -> DomainRulesScreen(state, padding)
                 RootTab.Settings -> SettingsScreen(state, padding, onOpenFilters = { currentTab = RootTab.Filters })
             }

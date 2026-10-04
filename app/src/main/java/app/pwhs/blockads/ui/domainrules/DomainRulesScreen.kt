@@ -46,6 +46,11 @@ import app.pwhs.blockads.ui.event.UiEventEffect
 import app.pwhs.blockads.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
+import androidx.compose.material.icons.filled.FileUpload
+import app.pwhs.blockads.data.entities.CustomDnsRule
+import app.pwhs.blockads.data.entities.WhitelistDomain
+import app.pwhs.blockads.ui.domainrules.dialog.EditDomainDialog
+import app.pwhs.blockads.ui.domainrules.dialog.ImportDomainsDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,6 +63,9 @@ fun DomainRulesScreen(
 
     var searchQuery by remember { mutableStateOf("") }
     var showAddDialog by remember { mutableStateOf(false) }
+    var showImportDialog by remember { mutableStateOf(false) }
+    var editingWhitelistDomain by remember { mutableStateOf<WhitelistDomain?>(null) }
+    var editingBlocklistRule by remember { mutableStateOf<CustomDnsRule?>(null) }
 
     val pagerState = rememberPagerState(initialPage = 0) { 2 }
     val scope = rememberCoroutineScope()
@@ -85,6 +93,14 @@ fun DomainRulesScreen(
                     )
                 },
                 actions = {
+                    IconButton(
+                        onClick = { showImportDialog = true }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FileUpload,
+                            contentDescription = stringResource(R.string.settings_import)
+                        )
+                    }
                     IconButton(
                         onClick = { showAddDialog = true }
                     ) {
@@ -194,11 +210,13 @@ fun DomainRulesScreen(
                 when (page) {
                     0 -> WhitelistTab(
                         domains = filteredWhitelist,
-                        onRemove = { viewModel.removeWhitelistDomain(it) }
+                        onRemove = { viewModel.removeWhitelistDomain(it) },
+                        onEdit = { editingWhitelistDomain = it }
                     )
                     1 -> BlocklistTab(
                         domains = filteredBlocklist,
-                        onRemove = { viewModel.removeBlocklistDomain(it) }
+                        onRemove = { viewModel.removeBlocklistDomain(it) },
+                        onEdit = { editingBlocklistRule = it }
                     )
                 }
             }
@@ -216,6 +234,39 @@ fun DomainRulesScreen(
                     viewModel.addBlocklistDomain(domain)
                 }
                 showAddDialog = false
+            }
+        )
+    }
+
+    editingWhitelistDomain?.let { domain ->
+        EditDomainDialog(
+            initialDomain = domain.domain,
+            onDismiss = { editingWhitelistDomain = null },
+            onConfirm = { newDomain ->
+                viewModel.updateWhitelistDomain(domain, newDomain)
+                editingWhitelistDomain = null
+            }
+        )
+    }
+
+    editingBlocklistRule?.let { rule ->
+        EditDomainDialog(
+            initialDomain = rule.domain,
+            onDismiss = { editingBlocklistRule = null },
+            onConfirm = { newDomain ->
+                viewModel.updateBlocklistDomain(rule, newDomain)
+                editingBlocklistRule = null
+            }
+        )
+    }
+
+    if (showImportDialog) {
+        ImportDomainsDialog(
+            initialIsAllow = pagerState.currentPage == 0,
+            onDismiss = { showImportDialog = false },
+            onImport = { domains, isAllow ->
+                viewModel.importDomains(domains, isAllow)
+                showImportDialog = false
             }
         )
     }

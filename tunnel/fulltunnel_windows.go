@@ -88,4 +88,3 @@ func (e *Engine) StartFullDevice(device PacketDevice, protector SocketProtector)
 	btun.halt()
 	logf("StartFullDevice: stopped")
 }
-

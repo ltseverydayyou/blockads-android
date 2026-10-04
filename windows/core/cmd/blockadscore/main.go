@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -211,16 +212,25 @@ func main() {
 	if !ensureElevated() {
 		return
 	}
+	logDir := os.Getenv("LOCALAPPDATA") + "\\BlockAds\\runtime"
+	_ = os.MkdirAll(logDir, 0700)
+	if file, err := os.OpenFile(logDir+"\\core.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600); err == nil {
+		log.SetOutput(file)
+		os.Stderr = file
+	}
 	startDNSCleanupWatchdog()
 	m, err := core.NewManager()
 	if err != nil {
 		log.Fatal(err)
 	}
 	if m.Settings().ProtectionEnabled {
-		if err := m.Start(true); err != nil {
-			log.Printf("restore protection state: %v", err)
-		}
+		go func() {
+			if err := m.Start(true); err != nil {
+				log.Printf("restore protection state: %v", err)
+			}
+		}()
 	}
+	go m.RunMonitor(context.Background())
 	s := &server{m: m}
 	srv := &http.Server{Addr: "127.0.0.1:8754", Handler: s.routes(), ReadHeaderTimeout: 5 * time.Second}
 	fmt.Println("BlockAds Windows core listening on http://127.0.0.1:8754")

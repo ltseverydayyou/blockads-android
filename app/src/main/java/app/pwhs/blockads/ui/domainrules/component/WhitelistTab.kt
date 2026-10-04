@@ -21,7 +21,8 @@ import app.pwhs.blockads.ui.theme.TextSecondary
 @Composable
 fun WhitelistTab(
     domains: List<WhitelistDomain>,
-    onRemove: (WhitelistDomain) -> Unit
+    onRemove: (WhitelistDomain) -> Unit,
+    onEdit: (WhitelistDomain) -> Unit = {}
 ) {
     if (domains.isEmpty()) {
         EmptyState(stringResource(R.string.whitelist_domains_empty))
@@ -53,7 +54,8 @@ fun WhitelistTab(
                             addedTimestamp = domain.addedTimestamp,
                             iconTint = MaterialTheme.colorScheme.secondary,
                             icon = Icons.Default.CheckCircle,
-                            onDelete = { onRemove(domain) }
+                            onDelete = { onRemove(domain) },
+                            onEdit = { onEdit(domain) }
                         )
                     }
                 }

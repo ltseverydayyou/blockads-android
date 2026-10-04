@@ -3,16 +3,20 @@ module github.com/ltseverydayyou/blockads-windows-core
 go 1.23.5
 
 require (
-	github.com/miekg/dns v1.1.62
 	github.com/nqmgaming/blockads-tunnel v0.0.0
 	golang.org/x/sys v0.35.0
-	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb
 )
 
 require (
+	git.schwanenlied.me/yawning/x448.git v0.0.0-20170617130356-01b048fb03d6 // indirect
+	github.com/cisco/go-hpke v0.0.0-20210215210317-01c430f1f302 // indirect
+	github.com/cisco/go-tls-syntax v0.0.0-20200617162716-46b0cfb76b9b // indirect
+	github.com/cloudflare/circl v1.0.0 // indirect
+	github.com/cloudflare/odoh-go v1.0.0 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/pprof v0.0.0-20210407192527-94a9f03dee38 // indirect
+	github.com/miekg/dns v1.1.62 // indirect
 	github.com/onsi/ginkgo/v2 v2.9.5 // indirect
 	github.com/quic-go/quic-go v0.48.2 // indirect
 	github.com/sagernet/gomobile v0.1.12 // indirect
@@ -28,6 +32,7 @@ require (
 	golang.org/x/tools v0.36.0 // indirect
 	golang.org/x/tools/go/expect v0.1.1-deprecated // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
+	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb // indirect
 	gvisor.dev/gvisor v0.0.0-20250523182742-eede7a881b20 // indirect
 )
 

@@ -80,4 +80,3 @@ func (m *Manager) restoreDNS() error {
 	_ = os.Remove(m.dnsBackupPath)
 	return nil
 }
-

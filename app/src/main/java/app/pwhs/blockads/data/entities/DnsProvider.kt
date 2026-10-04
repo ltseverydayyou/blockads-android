@@ -9,7 +9,8 @@ data class DnsProvider(
     val ipAddress: String,
     val dohUrl: String? = null,
     val description: String,
-    @DrawableRes val iconRes: Int? = null
+    @DrawableRes val iconRes: Int? = null,
+    val odohRelayUrl: String? = null
 )
 
 enum class DnsCategory {
@@ -47,6 +48,16 @@ object DnsProviders {
         description = "Privacy-focused, fastest DNS resolver"
     )
 
+    val CLOUDFLARE_ODOH = DnsProvider(
+        id = "cloudflare_odoh",
+        name = "Cloudflare (ODoH)",
+        category = DnsCategory.PRIVACY,
+        ipAddress = "1.1.1.1",
+        dohUrl = "https://odoh.cloudflare-dns.com/dns-query",
+        odohRelayUrl = "https://odoh-relay.edgecompute.app/",
+        description = "Oblivious DoH separating IP from DNS queries via Fastly relay"
+    )
+
     val ADGUARD = DnsProvider(
         id = "adguard",
         name = "AdGuard DNS",
@@ -63,6 +74,15 @@ object DnsProviders {
         ipAddress = "9.9.9.9",
         dohUrl = "https://dns.quad9.net/dns-query",
         description = "Security and privacy-focused DNS"
+    )
+
+    val QUAD9_DOQ = DnsProvider(
+        id = "quad9_doq",
+        name = "Quad9 (DoQ)",
+        category = DnsCategory.PRIVACY,
+        ipAddress = "9.9.9.9",
+        dohUrl = "quic://dns.quad9.net",
+        description = "Security and privacy-focused DNS over QUIC"
     )
 
     val OPENDNS = DnsProvider(
@@ -92,6 +112,24 @@ object DnsProviders {
         description = "Cloudflare DNS with malware and adult content blocking"
     )
 
+    val DNSBUNKER = DnsProvider(
+        id = "dnsbunker",
+        name = "DNSBunker",
+        category = DnsCategory.PRIVACY,
+        ipAddress = "185.250.250.61",
+        dohUrl = "https://dnsbunker.org/dns-query",
+        description = "Encrypted DNS from Germany with Hagezi ad, tracker & threat blocking"
+    )
+
+    val DNSBUNKER_DOQ = DnsProvider(
+        id = "dnsbunker_doq",
+        name = "DNSBunker (DoQ)",
+        category = DnsCategory.PRIVACY,
+        ipAddress = "185.250.250.61",
+        dohUrl = "quic://dnsbunker.org",
+        description = "DNS over QUIC from Germany with Hagezi ad & threat blocking"
+    )
+
     val MULLVAD = DnsProvider(
         id = "mullvad",
         name = "Mullvad DNS",
@@ -105,12 +143,16 @@ object DnsProviders {
         SYSTEM,
         ADGUARD,
         CLOUDFLARE,
+        CLOUDFLARE_ODOH,
         CLOUDFLARE_FAMILY,
+        DNSBUNKER,
+        DNSBUNKER_DOQ,
         GOOGLE,
         MULLVAD,
         OPENDNS,
         OPENDNS_FAMILY,
-        QUAD9
+        QUAD9,
+        QUAD9_DOQ
     )
 
     fun getById(id: String): DnsProvider? = ALL_PROVIDERS.find { it.id == id }

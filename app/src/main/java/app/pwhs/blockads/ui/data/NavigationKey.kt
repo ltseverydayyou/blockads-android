@@ -1,6 +1,7 @@
 package app.pwhs.blockads.ui.data
 
 import androidx.navigation3.runtime.NavKey
+import app.pwhs.blockads.ui.logs.data.LogFilterStatus
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -31,7 +32,10 @@ data object SettingsKey : NavKey
 data object StatisticsKey : NavKey
 
 @Serializable
-data object LogsKey : NavKey
+data class LogsKey(
+    val filterStatus: LogFilterStatus = LogFilterStatus.ALL,
+    val searchQuery: String = ""
+) : NavKey
 
 @Serializable
 data object ProfileKey : NavKey
@@ -69,3 +73,12 @@ data class WireGuardEditKey(val profileId: String) : NavKey
 
 @Serializable
 data object HttpsFilteringKey : NavKey
+
+@Serializable
+data class BrowserKey(val initialUrl: String = "https://m.youtube.com") : NavKey
+
+@Serializable
+data object ElementRulesKey : NavKey
+
+@Serializable
+data object CertInstallationWizardKey : NavKey

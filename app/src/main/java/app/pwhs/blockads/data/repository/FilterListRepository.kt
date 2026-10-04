@@ -27,7 +27,8 @@ class FilterListRepository(
     private val whitelistDomainDao: WhitelistDomainDao,
     private val customDnsRuleDao: CustomDnsRuleDao,
     private val client: HttpClient,
-    private val downloadManager: FilterDownloadManager
+    private val downloadManager: FilterDownloadManager,
+    private val seeder: FilterListSeeder = FilterListSeeder(context, filterListDao, client)
 ) {
 
     companion object {
@@ -37,9 +38,6 @@ class FilterListRepository(
         const val BLOCK_REASON_SECURITY = "SECURITY"
         const val BLOCK_REASON_FIREWALL = "FIREWALL"
         const val BLOCK_REASON_UPSTREAM_DNS = "upstream_dns"
-
-        private const val FILTER_LIST_JSON_URL =
-            "https://raw.githubusercontent.com/pass-with-high-score/blockads-default-filter/refs/heads/main/output/filter_lists.json"
     }
 
     // Paths to pre-compiled binary files for Go Native Engine (CSV strings)
@@ -82,6 +80,23 @@ class FilterListRepository(
     fun getCosmeticCssPath(): String? {
         val file = File(context.filesDir, "$CACHE_DIR/cosmetic_rules.css")
         return if (file.exists() && file.length() > 0) file.absolutePath else null
+    }
+
+    /** Returns adPathPatterns from browser_rules.json as newline-separated string. */
+    fun getAdPathPatterns(): String {
+        return try {
+            val json = context.assets.open("browser_rules.json").bufferedReader().use { it.readText() }
+            // Simple extraction: find "adPathPatterns":[...] and parse the strings
+            val match = """"adPathPatterns"\s*:\s*\[(.*?)]""".toRegex(RegexOption.DOT_MATCHES_ALL)
+                .find(json)?.groupValues?.get(1) ?: return ""
+            """"(.*?)"""".toRegex().findAll(match)
+                .map { it.groupValues[1] }
+                .filter { it.isNotBlank() }
+                .joinToString("\n")
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to read ad path patterns from browser_rules.json")
+            ""
+        }
     }
 
     private inline fun checkDomainAndParents(
@@ -141,157 +156,24 @@ class FilterListRepository(
     // ────────────────────────────────────────────────────────────────────
 
     /**
-     * Seeds default filter lists by fetching from the remote JSON URL.
-     * Updates existing entries so bloomUrl/trieUrl/cssUrl/ruleCount stay current.
+     * Seeds default filter lists from bundled assets and syncs with remote compiler API.
      */
     suspend fun seedDefaultsIfNeeded() {
-        fetchAndSyncRemoteFilterLists()
+        seeder.seedDefaultsIfNeeded()
     }
 
     /**
      * Fetches the remote filter_lists.json and syncs pre-compiled URLs to the local DB.
-     * Keeps bloomUrl/trieUrl/cssUrl/ruleCount fresh when the server regenerates binaries.
      */
-    suspend fun fetchAndSyncRemoteFilterLists() = withContext(Dispatchers.IO) {
-        try {
-            val channel = client.get(FILTER_LIST_JSON_URL).bodyAsChannel()
-            val buffer = ByteArray(256 * 1024)
-            val output = java.io.ByteArrayOutputStream()
-            while (!channel.isClosedForRead) {
-                val read = channel.readAvailable(buffer)
-                if (read > 0) output.write(buffer, 0, read)
-            }
-            val jsonString = output.toString(Charsets.UTF_8.name())
-            val remoteLists = parseRemoteFilterJson(jsonString)
-            if (remoteLists.isEmpty()) return@withContext
-
-            val existingLists = filterListDao.getAllSync()
-            val existingByName = existingLists.associateBy { it.name }
-
-            for (remote in remoteLists) {
-                val existing = existingByName[remote.name]
-                val category = if (remote.category == "security") FilterList.CATEGORY_SECURITY else FilterList.CATEGORY_AD
-                if (existing != null) {
-                    val needsUpdate = existing.url != (remote.originalUrl ?: "") ||
-                        existing.description != (remote.description ?: "") ||
-                        existing.category != category ||
-                        existing.bloomUrl != remote.bloomUrl ||
-                        existing.trieUrl != remote.trieUrl ||
-                        existing.cssUrl != (remote.cssUrl ?: "") ||
-                        existing.scriptletsUrl != (remote.scriptletsUrl ?: "") ||
-                        existing.ruleCount != remote.ruleCount ||
-                        existing.domainCount != remote.ruleCount ||
-                        existing.originalUrl != (remote.originalUrl ?: existing.originalUrl) ||
-                        !existing.isBuiltIn
-
-                    if (needsUpdate) {
-                        filterListDao.update(
-                            existing.copy(
-                                url = remote.originalUrl ?: "",
-                                description = remote.description ?: "",
-                                category = category,
-                                bloomUrl = remote.bloomUrl,
-                                trieUrl = remote.trieUrl,
-                                domainCount = remote.ruleCount,
-                                cssUrl = remote.cssUrl ?: "",
-                                scriptletsUrl = remote.scriptletsUrl ?: "",
-                                ruleCount = remote.ruleCount,
-                                originalUrl = remote.originalUrl ?: existing.originalUrl,
-                                isBuiltIn = true
-                            )
-                        )
-                        Timber.d("Updated remote filter: ${remote.name}")
-                    }
-                } else {
-                    filterListDao.insert(
-                        FilterList(
-                            name = remote.name,
-                            url = remote.originalUrl ?: "",
-                            description = remote.description ?: "",
-                            isEnabled = remote.isEnabled,
-                            isBuiltIn = remote.isBuiltIn,
-                            category = category,
-                            ruleCount = remote.ruleCount,
-                            bloomUrl = remote.bloomUrl,
-                            trieUrl = remote.trieUrl,
-                            cssUrl = remote.cssUrl ?: "",
-                            scriptletsUrl = remote.scriptletsUrl ?: "",
-                            originalUrl = remote.originalUrl ?: ""
-                        )
-                    )
-                    Timber.d("Inserted new remote filter: ${remote.name}")
-                }
-            }
-
-            val remoteNames = remoteLists.map { it.name }.toSet()
-            val obsolete = existingLists.filter { it.isBuiltIn && it.name !in remoteNames }
-            for (o in obsolete) {
-                filterListDao.delete(o)
-                Timber.d("Removed obsolete built-in filter: ${o.name}")
-            }
-
-            Timber.d("Synced ${remoteLists.size} filters from remote JSON")
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to fetch remote filter list JSON")
-        }
+    suspend fun fetchAndSyncRemoteFilterLists() {
+        seeder.fetchAndSyncRemoteFilterLists()
     }
 
     /**
      * Simple JSON parser for the filter_lists.json array.
      */
-    private fun parseRemoteFilterJson(json: String): List<app.pwhs.blockads.data.remote.models.FilterList> {
-        return try {
-            val results = mutableListOf<app.pwhs.blockads.data.remote.models.FilterList>()
-            val objects = json.split("},").map {
-                it.trim().removePrefix("[").removeSuffix("]").trim() + "}"
-            }
-
-            for (obj in objects) {
-                val cleaned = obj.trim().removePrefix("{").removeSuffix("}").removeSuffix("},")
-                if (cleaned.isBlank()) continue
-
-                fun extractString(key: String): String? {
-                    val pattern = "\"$key\"\\s*:\\s*\"(.*?)\"".toRegex()
-                    return pattern.find(cleaned)?.groupValues?.get(1)
-                        ?.replace("\\u0026", "&")
-                }
-
-                fun extractInt(key: String): Int {
-                    val pattern = "\"$key\"\\s*:\\s*(\\d+)".toRegex()
-                    return pattern.find(cleaned)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                }
-
-                fun extractBoolean(key: String): Boolean {
-                    val pattern = "\"$key\"\\s*:\\s*(true|false)".toRegex()
-                    return pattern.find(cleaned)?.groupValues?.get(1) == "true"
-                }
-
-                val name = extractString("name") ?: continue
-                val bloomUrl = extractString("bloomUrl") ?: continue
-                val trieUrl = extractString("trieUrl") ?: continue
-
-                results.add(
-                    app.pwhs.blockads.data.remote.models.FilterList(
-                        name = name,
-                        id = extractString("id") ?: name.lowercase().replace(" ", "_"),
-                        description = extractString("description"),
-                        isEnabled = extractBoolean("isEnabled"),
-                        isBuiltIn = extractBoolean("isBuiltIn"),
-                        category = extractString("category"),
-                        ruleCount = extractInt("ruleCount"),
-                        bloomUrl = bloomUrl,
-                        trieUrl = trieUrl,
-                        cssUrl = extractString("cssUrl"),
-                        scriptletsUrl = extractString("scriptletsUrl"),
-                        originalUrl = extractString("originalUrl")
-                    )
-                )
-            }
-            results
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to parse remote filter JSON")
-            emptyList()
-        }
+    internal fun parseRemoteFilterJson(json: String): List<app.pwhs.blockads.data.remote.models.FilterList> {
+        return seeder.parseFilterJson(json)
     }
 
     // ────────────────────────────────────────────────────────────────────

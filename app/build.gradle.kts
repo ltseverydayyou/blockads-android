@@ -8,41 +8,22 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.sentry)
+    alias(libs.plugins.kover)
 }
 
-tasks.register<Exec>("buildGoTunnel") {
-    val libsDir = file("libs")
-    val aarFile = file("libs/tunnel.aar")
-    val tunnelDir = rootProject.file("tunnel")
-    
-    // Only rebuild if the tunnel source code changes (or if aar is missing)
-    inputs.dir(tunnelDir)
-    outputs.file(aarFile)
+// Where the Go tunnel comes from. See the root build file and docs/TUNNEL.md.
+//   unset      the published app.pwhs:tunnel release artifact, checksum-verified
+//   local      built from tunnel/ by :buildGoTunnel
+//   prebuilt   an aar already sitting at build/tunnel/tunnel.aar, used as-is
+val tunnelSource = providers.gradleProperty("tunnel.source").orNull
+val tunnelFromFile = tunnelSource == "local" || tunnelSource == "prebuilt"
 
-    workingDir = tunnelDir
-    
-    // For local development, gomobile might not be in PATH for Gradle, so we use bash
-    // to load user's profile which usually exports GOPATH/bin to PATH.
-    commandLine(
-        "bash", "-c",
-        "mkdir -p \"${libsDir.absolutePath}\" && " +
-        "export GOFLAGS=\"-buildvcs=false\" && " +
-        "export PATH=\"\$PATH:\$GOPATH/bin:\$HOME/go/bin:/usr/local/go/bin\" && " +
-        "gomobile bind -target=android -androidapi 24 -trimpath " +
-        "-ldflags=\"-s -w -buildid= -extldflags=-Wl,-z,max-page-size=16384\" " +
-        "-o ${aarFile.absolutePath} github.com/nqmgaming/blockads-tunnel"
-    )
-
-    doFirst {
-        if (!libsDir.exists()) {
-            libsDir.mkdirs()
-        }
-        println("Building Go tunnel for Android...")
-    }
-    
-    doLast {
-        println("Go tunnel built successfully.")
-    }
+when (tunnelSource) {
+    "local" -> tasks.named("preBuild") { dependsOn(":buildGoTunnel") }
+    // "prebuilt" means the caller already produced the aar, so there is nothing
+    // to run first; building it here would just repeat their work.
+    "prebuilt" -> Unit
+    else -> tasks.named("preBuild") { dependsOn(":verifyTunnelAar") }
 }
 
 android {
@@ -56,8 +37,8 @@ android {
         applicationId = "app.pwhs.blockads"
         minSdk = 24
         targetSdk = 36
-        versionCode = 51
-        versionName = "6.5.2"
+        versionCode = 54
+        versionName = "6.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -95,17 +76,50 @@ android {
             }
         }
         debug {
-            // Distinct applicationId so the debug test build installs
-            // alongside a release install (different signature) without
-            // wiping the user's configured app. FileProvider authority is
-            // ${applicationId}.fileprovider, so it stays unique too.
-            applicationIdSuffix = ".debug"
+            // Debug build shares standard applicationId for unified testing and deployment
         }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    sourceSets {
+        // MigrationTestHelper reads exported schemas as assets.
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            // Robolectric's SDK 36 runtime pokes FileDescriptor internals.
+            it.jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED")
+            // Robolectric's SDK 36 runtime needs Java 21; the build itself stays on the CI JDK.
+            it.javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+            // A non-UTC, half-hour zone so local-vs-UTC date bugs fail on UTC CI runners too.
+            it.environment("TZ", "Asia/Kolkata")
+            it.systemProperty("user.timezone", "Asia/Kolkata")
+        }
+    }
+
+    lint {
+        checkReleaseBuilds = true
+        // Existing findings live in the baseline; anything new fails the build.
+        // Regenerate with ./gradlew :app:updateLintBaseline after fixing baselined issues.
+        baseline = file("lint-baseline.xml")
+        error += setOf(
+            "SetJavaScriptEnabled",
+            "JavascriptInterface",
+            "AddJavascriptInterface",
+            "AllowBackup",
+            "ExportedReceiver",
+            "ExportedService",
+            "SetWorldReadable",
+            "SetWorldWritable",
+            "WorldReadableFiles",
+            "WorldWriteableFiles",
+        )
     }
 
     buildFeatures {
@@ -181,7 +195,19 @@ dependencies {
     implementation(libs.ktor.client.logging)
     
     // Go Tunnel backend
-    implementation(files("libs/tunnel.aar"))
+    if (tunnelFromFile) {
+        implementation(files(rootProject.layout.buildDirectory.file("tunnel/tunnel.aar")))
+    } else {
+        implementation(libs.tunnel) {
+            // No Ivy/Maven metadata on a release asset, so name the artifact
+            // explicitly; otherwise Gradle looks for tunnel-<version>.jar.
+            artifact {
+                name = "tunnel"
+                type = "aar"
+                extension = "aar"
+            }
+        }
+    }
 
     implementation(libs.timber)
 
@@ -213,12 +239,41 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.mockk)
+    testImplementation(libs.turbine)
+    testImplementation(libs.ktor.client.mock)
+    testImplementation(platform(libs.koin.bom))
+    testImplementation(libs.koin.test.junit4)
+    testImplementation(libs.androidx.room.testing)
+    testImplementation(libs.androidx.work.testing)
+    testImplementation(libs.androidx.test.core.ktx)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.androidx.room.testing)
+    androidTestImplementation(libs.mockk.android)
+    androidTestImplementation(libs.mockwebserver)
+    androidTestImplementation(libs.okhttp.tls)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+}
+
+kover {
+    currentProject {
+        createVariant("unit") { add("debug") }
+    }
+    reports {
+        filters {
+            excludes {
+                classes("*_Impl", "*_Impl\$*", "*.BuildConfig", "*ComposableSingletons*", "*.R", "*.R\$*")
+                annotatedBy("androidx.compose.ui.tooling.preview.Preview", "androidx.compose.runtime.Composable")
+            }
+        }
+    }
 }
 
 sentry {

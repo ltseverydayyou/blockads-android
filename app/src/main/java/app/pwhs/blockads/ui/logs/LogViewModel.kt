@@ -14,6 +14,7 @@ import app.pwhs.blockads.data.entities.WhitelistDomain
 import app.pwhs.blockads.data.dao.WhitelistDomainDao
 import app.pwhs.blockads.ui.event.UiEvent
 import app.pwhs.blockads.ui.event.toast
+import app.pwhs.blockads.ui.logs.data.LogFilterStatus
 import app.pwhs.blockads.ui.logs.data.TimeRange
 import app.pwhs.blockads.utils.CustomRuleParser
 import kotlinx.coroutines.Dispatchers
@@ -33,9 +34,10 @@ import kotlinx.coroutines.launch
 import java.io.PrintWriter
 import java.text.SimpleDateFormat
 import java.util.Locale
-
+import app.pwhs.blockads.data.dao.FirewallRuleDao
 import app.pwhs.blockads.data.datastore.AppPreferences
-import kotlinx.coroutines.flow.map
+import app.pwhs.blockads.data.entities.FirewallRule
+import app.pwhs.blockads.service.ServiceController
 
 class LogViewModel(
     private val dnsLogDao: DnsLogDao,
@@ -45,10 +47,16 @@ class LogViewModel(
     private val filterListRepository: FilterListRepository,
     private val appPrefs: AppPreferences,
     private val application: Application,
+    private val firewallRuleDao: FirewallRuleDao? = null,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) : AndroidViewModel(application) {
 
-    private val _showBlockedOnly = MutableStateFlow(false)
-    val showBlockedOnly: StateFlow<Boolean> = _showBlockedOnly.asStateFlow()
+    private val _filterStatus = MutableStateFlow(LogFilterStatus.ALL)
+    val filterStatus: StateFlow<LogFilterStatus> = _filterStatus.asStateFlow()
+
+    val showBlockedOnly: StateFlow<Boolean> = _filterStatus
+        .map { it == LogFilterStatus.BLOCKED }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -82,19 +90,34 @@ class LogViewModel(
     val appNames: StateFlow<List<String>> = dnsLogDao.getDistinctAppNames()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val blockedFirewallPackages: StateFlow<Set<String>> = (firewallRuleDao?.getAll() ?: MutableStateFlow(emptyList()))
+        .map { list -> list.map { it.packageName }.toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    fun toggleAppFirewall(packageName: String) {
+        if (packageName.isBlank() || firewallRuleDao == null) return
+        viewModelScope.launch {
+            val existing = firewallRuleDao.getByPackageName(packageName)
+            if (existing != null) {
+                firewallRuleDao.deleteByPackageName(packageName)
+            } else {
+                firewallRuleDao.insert(FirewallRule(packageName = packageName))
+            }
+            ServiceController.requestRestart(application.applicationContext)
+        }
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     val logs: StateFlow<List<DnsLogEntry>> = combine(
-        _showBlockedOnly,
+        _filterStatus,
         _timeRange
-    ) { blockedOnly, range -> Pair(blockedOnly, range) }
-        .flatMapLatest { (blockedOnly, range) ->
+    ) { status, range -> Pair(status, range) }
+        .flatMapLatest { (status, range) ->
             val since = if (range == TimeRange.ALL) 0L
-            else System.currentTimeMillis() - range.millis
-            when {
-                blockedOnly && since > 0 -> dnsLogDao.getBlockedOnlySince(since)
-                blockedOnly -> dnsLogDao.getBlockedOnly()
-                since > 0 -> dnsLogDao.getAllSince(since)
-                else -> dnsLogDao.getAll()
+            else clock() - range.millis
+            when (status) {
+                LogFilterStatus.ALL -> if (since > 0) dnsLogDao.getAllSince(since) else dnsLogDao.getAll()
+                LogFilterStatus.BLOCKED -> if (since > 0) dnsLogDao.getBlockedOnlySince(since) else dnsLogDao.getBlockedOnly()
             }
         }
         .combine(_searchQuery) { logs, query ->
@@ -110,8 +133,16 @@ class LogViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    fun setFilterStatus(status: LogFilterStatus) {
+        _filterStatus.value = status
+    }
+
     fun toggleFilter() {
-        _showBlockedOnly.value = !_showBlockedOnly.value
+        _filterStatus.value = if (_filterStatus.value == LogFilterStatus.BLOCKED) {
+            LogFilterStatus.ALL
+        } else {
+            LogFilterStatus.BLOCKED
+        }
     }
 
     fun setSearchQuery(query: String) {

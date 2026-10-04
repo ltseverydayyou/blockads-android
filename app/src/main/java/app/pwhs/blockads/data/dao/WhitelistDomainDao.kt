@@ -19,6 +19,12 @@ interface WhitelistDomainDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(domain: WhitelistDomain)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(domains: List<WhitelistDomain>)
+
+    @androidx.room.Update
+    suspend fun update(domain: WhitelistDomain)
+
     @Delete
     suspend fun delete(domain: WhitelistDomain)
 
